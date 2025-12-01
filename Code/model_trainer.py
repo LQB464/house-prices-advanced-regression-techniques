@@ -78,19 +78,27 @@ class ModelTrainer:
 
         self.dp = DataPreprocessor(target_col=self.target_col)
 
-    @staticmethod
-    def _build_logger() -> logging.Logger:
+    def _build_logger(self) -> logging.Logger:
         """
-        Tao logger de ghi log ra file training.log trong thu muc output.
+        Logger luôn ghi vào output_dir/training.log
+        (output_dir được truyền từ main.py và là thư mục gốc).
         """
         logger = logging.getLogger("ModelTrainer")
+
+        # tránh việc thêm 2 lần handler
         if logger.handlers:
             return logger
+
         logger.setLevel(logging.INFO)
-        fh = logging.FileHandler("model_outputs/training.log", mode="w", encoding="utf-8")
+
+        log_path = Path(self.output_dir) / "training.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
         fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         fh.setFormatter(fmt)
         logger.addHandler(fh)
+
         return logger
 
     @staticmethod
@@ -142,7 +150,10 @@ class ModelTrainer:
     # 4) Danh gia 1 mo hinh da fit
     def evaluate_model(self, name: str, pipe: Pipeline) -> Tuple[float, float]:
         y_pred = pipe.predict(self.X_test_)
-        rmse = mean_squared_error(self.y_test_, y_pred, squared=False)
+        # Tinh MSE binh thuong, sau do lay can bac 2 de ra RMSE
+        mse = mean_squared_error(self.y_test_, y_pred)
+        rmse = np.sqrt(mse)
+
         r2 = r2_score(self.y_test_, y_pred)
         self.results_[name] = {"rmse": rmse, "r2": r2}
         self.logger.info(f"{name}: RMSE={rmse:.4f}, R2={r2:.4f}")

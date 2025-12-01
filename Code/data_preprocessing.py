@@ -298,7 +298,7 @@ def make_preprocessor(df_train: pd.DataFrame, df_test: Optional[pd.DataFrame] = 
     cat_pipeline = Pipeline(
         steps=[
             ("impute", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore", sparse=False)),
+            ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
         ]
     )
 

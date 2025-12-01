@@ -1,38 +1,58 @@
 """
 main.py
 
-Script chay chinh cua du an:
-- Phan 1: Tien xu ly du lieu (DataPreprocessor)
-- Phan 2: Mo hinh hoc may (ModelTrainer)
-- Phan 3: Truc quan hoa (EDAVisualizer) - optional
-
-Chay: python main.py
+Script chạy chính của dự án:
+- Phần 1: Tiền xử lý dữ liệu (DataPreprocessor)
+- Phần 2: Huấn luyện & tối ưu mô hình học máy (ModelTrainer)
+- Phần 3: Trực quan hóa & phân tích dữ liệu (EDAVisualizer)
 """
 
+from pathlib import Path
+import pandas as pd
+
+# Import module trong cùng thư mục Code
 from model_trainer import ModelTrainer
 from eda_utils import EDAVisualizer
-import pandas as pd
 
 
 def main():
-    csv_path = "train-house-prices-advanced-regression-techniques.csv"
+    # Đường dẫn tuyệt đối của file main.py
+    this_file = Path(__file__).resolve()
+
+    # Thư mục Code/
+    code_dir = this_file.parent
+
+    # Thư mục gốc project: house-prices-advanced-regression-techniques/
+    project_root = code_dir.parent
+
+    # File CSV trong thư mục Data/
+    csv_path = project_root / "Data" / "train.csv"
+
+    # Output sẽ được ghi vào thư mục gốc
+    output_dir = project_root / "model_outputs"
+    eda_dir = project_root / "eda_plots"
 
     print("=== STEP 1: MODEL TRAINING PIPELINE ===")
+
     trainer = ModelTrainer(
         target_col="SalePrice",
         test_size=0.2,
         random_state=42,
-        output_dir="model_outputs"
+        output_dir=output_dir,   # <----- quan trọng
     )
 
-    # Run toàn bộ training + tuning
-    results = trainer.run(csv_path=csv_path, tune_optuna=True)
+    results = trainer.run(
+        csv_path=str(csv_path),
+        tune_optuna=True
+    )
+
     print("Training completed.")
     print(results)
 
-    print("\n=== STEP 2: RUN EDA (Optional) ===")
+    print("\n=== STEP 2: RUN EDA ===")
+
     df = pd.read_csv(csv_path)
-    eda = EDAVisualizer(df, target_col="SalePrice", output_dir="eda_plots")
+    eda = EDAVisualizer(df, target_col="SalePrice", output_dir=eda_dir)
 
     eda.plot_target_distribution()
     eda.plot_missing_values()
@@ -40,9 +60,9 @@ def main():
     eda.plot_correlation_heatmap()
     eda.plot_boxplots_for_top_categories("Neighborhood")
 
-    print("EDA completed. Charts saved to eda_plots/")
+    print(f"EDA completed. Charts saved to {eda_dir}")
 
-    print("\nDone!")
+    print("\nDONE!")
 
 
 if __name__ == "__main__":
