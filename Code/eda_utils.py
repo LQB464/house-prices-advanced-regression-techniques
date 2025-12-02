@@ -19,11 +19,7 @@ import seaborn as sns
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 
-try:
-    import shap
-    HAS_SHAP = True
-except ImportError:
-    HAS_SHAP = False
+import shap
 
 
 # -------------------------------------------------------------------
@@ -325,10 +321,6 @@ def plot_shap_summary(
     Vẽ SHAP summary plot (scatter + bar).
     Hỗ trợ tốt nhất cho tree models (RandomForest, XGBoost, LightGBM, CatBoost).
     """
-    if not HAS_SHAP:
-        raise ImportError(
-            "Thu vien shap chua duoc cai dat. Hay pip install shap truoc."
-        )
 
     est = _get_final_estimator(model)
     output_dir = _ensure_dir(output_dir)
