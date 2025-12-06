@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 # Import module trong cùng thư mục Code
-from model_trainer import ModelTrainer
+from modeling import ModelTrainer
 from eda_utils import EDAVisualizer
 
 
