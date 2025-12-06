@@ -1029,3 +1029,9 @@ class Preprocessor:
                 "Pipeline chưa hỗ trợ get_feature_names_out đầy đủ "
                 "(có thể một số step chưa cài đặt)."
             ) from e
+            
+            
+__all__ = [
+    build_feature_pipeline,
+    Preprocessor,
+]
