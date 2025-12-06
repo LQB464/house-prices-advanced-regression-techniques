@@ -6,7 +6,7 @@ Phan 2: Mo hinh hoc may
 Lop ModelTrainer chiu trach nhiem:
 - Nap du lieu (tu file CSV)
 - Tach train/test
-- Xay dung pipeline tien xu ly (goi DataPreprocessor)
+- Xay dung pipeline tien xu ly (goi Preprocessor)
 - Huan luyen nhieu mo hinh
 - Toi uu sieu tham so (Optuna, co them GridSearchCV optional)
 - Danh gia mo hinh
@@ -33,7 +33,7 @@ from sklearn.svm import SVR
 import optuna
 import logging
 
-from preprocessing import DataPreprocessor, build_feature_pipeline
+from preprocessing import Preprocessor, build_feature_pipeline
 
 
 class ModelTrainer:
@@ -76,7 +76,7 @@ class ModelTrainer:
         self.models_: Dict[str, Pipeline] = {}
         self.results_: Dict[str, Dict] = {}
 
-        self.dp = DataPreprocessor(target_col=self.target_col)
+        self.dp = Preprocessor(target_col=self.target_col)
 
     def _build_logger(self) -> logging.Logger:
         """
