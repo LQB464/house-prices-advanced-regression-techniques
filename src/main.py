@@ -12,15 +12,18 @@ from modeling import ModelTrainer
 
 import warnings
 import numpy as np
+import re
 
-# Disable numpy invalid warnings
-np.seterr(all="ignore")
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 warnings.filterwarnings(
     "ignore",
-    message="invalid value encountered",
-    category=RuntimeWarning
+    message=re.escape("invalid value encountered in greater_equal"),
+    category=RuntimeWarning,
 )
+
+np.seterr(all="ignore")
+import pandas as pd 
 
 
 

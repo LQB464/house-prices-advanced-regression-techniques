@@ -389,6 +389,12 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
             raise ValueError("KBestMutualInfoSelector cần y để fit.")
         X_arr = np.asarray(X)
         y_arr = np.asarray(y)
+        
+        k = self.k
+        n_features = X_arr.shape[1]
+
+        if k > n_features:
+            k = n_features
 
         # bọc mutual_info_regression để truyền random_state
         def _mi(X_, y_):
