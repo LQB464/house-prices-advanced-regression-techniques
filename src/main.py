@@ -10,20 +10,9 @@ import argparse
 
 from modeling import ModelTrainer
 
-import warnings
-import numpy as np
-import re
+import pandas as pd
+pd.set_option("compute.use_numexpr", False)
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-warnings.filterwarnings(
-    "ignore",
-    message=re.escape("invalid value encountered in greater_equal"),
-    category=RuntimeWarning,
-)
-
-np.seterr(all="ignore")
-import pandas as pd 
 
 
 
