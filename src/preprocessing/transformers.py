@@ -367,16 +367,6 @@ class VarianceFeatureSelector(BaseEstimator, TransformerMixin):
 class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
     """
     Chọn top k feature theo Mutual Information với target.
-
-    - Áp dụng trên X sau khi đã qua toàn bộ preprocessing.
-    - Phù hợp khi số feature lớn, cần giảm nhiễu.
-
-    Parameters
-    ----------
-    k : int
-        Số lượng feature giữ lại.
-    random_state : int, default=0
-        Seed cho mutual_info_regression.
     """
 
     def __init__(self, k: int = 100, random_state: int = 0):
@@ -387,40 +377,38 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
     def fit(self, X, y):
         if y is None:
             raise ValueError("KBestMutualInfoSelector cần y để fit.")
+
         X_arr = np.asarray(X)
         y_arr = np.asarray(y)
-        
-        k = self.k
+
+        # --- CHỈNH ĐÚNG k ---
         n_features = X_arr.shape[1]
+        k = min(self.k, n_features)
 
-        if k > n_features:
-            k = n_features
-
-        # bọc mutual_info_regression để truyền random_state
         def _mi(X_, y_):
-            return mutual_info_regression(
-                X_, y_, random_state=self.random_state
-            )
+            return mutual_info_regression(X_, y_, random_state=self.random_state)
 
-        self.selector_ = SelectKBest(score_func=_mi, k=self.k)
+        self.selector_ = SelectKBest(score_func=_mi, k=k)
+
+        self.feature_names_in_ = getattr(X, "columns", None)
+
         self.selector_.fit(X_arr, y_arr)
         return self
 
     def transform(self, X):
         if self.selector_ is None:
             raise NotFittedError("KBestMutualInfoSelector chưa được fit.")
-        X_arr = np.asarray(X)
-        return self.selector_.transform(X_arr)
+        return self.selector_.transform(np.asarray(X))
 
     def get_feature_names_out(self, input_features=None):
         if self.selector_ is None:
             raise NotFittedError("KBestMutualInfoSelector chưa được fit.")
+
         if input_features is None:
-            input_features = getattr(self, "feature_names_in_", None)
+            input_features = self.feature_names_in_
+
         if input_features is None:
-            raise NotFittedError(
-                "KBestMutualInfoSelector không có thông tin input_features."
-            )
+            raise NotFittedError("Không tìm thấy input_features!")
 
         input_features = np.asarray(input_features, dtype=object)
         mask = self.selector_.get_support()
