@@ -326,3 +326,5 @@ class ModelTrainer:
 
         self.save_results()
         return self.results_
+
+__all__ = ["ModelTrainer"]
