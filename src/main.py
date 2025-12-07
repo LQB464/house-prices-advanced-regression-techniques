@@ -10,10 +10,8 @@ import argparse
 
 from modeling import ModelTrainer
 
-import pandas as pd
-pd.set_option("compute.use_numexpr", False)
-
-
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 def parse_args():
