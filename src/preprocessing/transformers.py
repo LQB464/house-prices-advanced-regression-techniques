@@ -9,37 +9,42 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.exceptions import NotFittedError
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
-
 class OrdinalMapper(BaseEstimator, TransformerMixin):
     """
-    Ánh xạ các cột ordinal theo dict mapping -> số.
+    Map ordinal columns to numeric values using a mapping dict.
 
-    mapping có thể là:
-        - Dict[str, List[str]]  (danh sách value theo thứ tự)
-        - Dict[str, Dict[str, int/float]]
+    mapping can be:
+        - Dict[str, List[str]]  list of ordered levels
+        - Dict[str, Dict[str, int or float]]
     """
 
     def __init__(self, mapping: Optional[Mapping[str, Any]] = None):
+        # Hyperparameter that sklearn expects in get_params / set_params
+        self.mapping = mapping
+
+        # Internal raw mapping storage
         self.mapping_raw = mapping or {}
+
+        # Fitted attributes
         self.mapping_: Dict[str, Dict[str, float]] = {}
         self.cols_: List[str] = []
 
     @staticmethod
     def _canon_to_numeric_map(mapping: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
         """
-        Chuyển:
-            - Dict[str, List[str]]  (canonical order)
-        hoặc
+        Convert:
+            - Dict[str, List[str]]  canonical order
+        or
             - Dict[str, Dict[str, int]]
-        thành:
-            Dict[str, Dict[str, float]] dùng cho OrdinalMapper.
+        into:
+            Dict[str, Dict[str, float]] used by OrdinalMapper.
         """
         final: Dict[str, Dict[str, float]] = {}
         for col, spec in mapping.items():
             if isinstance(spec, dict):
                 final[col] = {k: float(v) for k, v in spec.items()}
             else:
-                # giả định là iterable các level theo thứ tự
+                # Assume iterable of ordered levels
                 levels: Iterable[Any] = spec
                 final[col] = {v: float(i) for i, v in enumerate(levels, start=1)}
         return final
@@ -47,7 +52,11 @@ class OrdinalMapper(BaseEstimator, TransformerMixin):
     def fit(self, X: pd.DataFrame, y=None):
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
-        # chuẩn hoá mapping sang dict-of-dict numeric
+
+        # Save feature names for get_feature_names_out
+        self.feature_names_in_ = np.asarray(X.columns, dtype=object)
+
+        # Normalize mapping into numeric dict of dict
         numeric_map = self._canon_to_numeric_map(self.mapping_raw)
         self.mapping_ = {
             col: mp for col, mp in numeric_map.items() if col in X.columns
@@ -56,12 +65,14 @@ class OrdinalMapper(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: pd.DataFrame):
+        if not hasattr(self, "mapping_"):
+            raise NotFittedError("OrdinalMapper is not fitted yet.")
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
         X = X.copy()
         for col in self.cols_:
             mp = self.mapping_[col]
-            # map -> float, giá trị lạ sẽ thành NaN
+            # Map to float, unknown values become NaN
             X[col] = X[col].map(mp).astype(float)
         return X
 
@@ -69,7 +80,7 @@ class OrdinalMapper(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("OrdinalMapper chưa được fit.")
+            raise NotFittedError("OrdinalMapper has not been fitted yet.")
         return np.asarray(input_features, dtype=object)
 
 
