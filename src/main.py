@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument(
         "--data-path",
         type=Path,
-        default=Path("./data/house_prices.csv"),
+        default=Path("./dataset/house_prices.csv"),
         help="Path to training CSV",
     )
     parser.add_argument(
