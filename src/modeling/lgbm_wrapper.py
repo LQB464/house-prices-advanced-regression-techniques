@@ -91,6 +91,7 @@ class LGBMRegressorWithEarlyStopping(BaseEstimator, RegressorMixin):
             min_split_gain=self.min_split_gain,
             random_state=self.random_state,
             n_jobs=-1,
+            verbosity=-1,
         )
 
         self.model_.fit(
