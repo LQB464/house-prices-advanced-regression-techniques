@@ -10,9 +10,8 @@ Script chạy chính của dự án:
 from pathlib import Path
 import pandas as pd
 
-# Import module trong cùng thư mục Code
 from modeling import ModelTrainer
-from eda_utils import EDAVisualizer
+from eda_utils import EDAVisualizer 
 
 
 def main():
