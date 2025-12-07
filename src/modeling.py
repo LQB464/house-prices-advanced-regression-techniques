@@ -70,7 +70,7 @@ try:
 except Exception:
     HAS_OPTUNA = False
 
-from src.preprocessing import Preprocessor, build_feature_pipeline
+from preprocessing import Preprocessor, build_feature_pipeline
 
 
 def _rmse(y_true, y_pred) -> float:
