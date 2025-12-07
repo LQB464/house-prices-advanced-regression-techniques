@@ -16,13 +16,12 @@ import numpy as np
 # Disable numpy invalid warnings
 np.seterr(all="ignore")
 
-# Disable specific pandas expression warning
 warnings.filterwarnings(
     "ignore",
-    message="invalid value encountered in greater_equal",
-    category=RuntimeWarning,
-    module="pandas.core.computation.expressions"
+    message="invalid value encountered",
+    category=RuntimeWarning
 )
+
 
 
 def parse_args():
