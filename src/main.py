@@ -10,6 +10,20 @@ import argparse
 
 from modeling import ModelTrainer
 
+import warnings
+import numpy as np
+import pandas as pd
+
+# Disable numpy invalid warnings
+np.seterr(all="ignore")
+
+# Disable pandas warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+import pandas as pd
+warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
