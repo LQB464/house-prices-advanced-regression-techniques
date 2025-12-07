@@ -20,8 +20,9 @@ import itertools
 import logging
 import math
 import warnings
+from sklearn.exceptions import ConvergenceWarning
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 import numpy as np
 import pandas as pd
@@ -597,16 +598,17 @@ class ModelTrainer:
         n_trials: int = 30,
     ) -> Tuple[Dict, float, float]:
         """
-        Tune hyperparameters of a base model with Optuna.
+        Tune hyperparameters của một base model bằng Optuna.
 
-        Supported base_name values:
-        - "random_forest"
-        - "elasticnet"
-        - "xgb" (if xgboost installed)
-        - "catboost" (if catboost installed)
-        - "lgbm" (if lightgbm installed)
+        Supported base_name:
+            - "random_forest"
+            - "elasticnet"
+            - "xgb"      (nếu cài xgboost)
+            - "catboost" (nếu cài catboost)
+            - "lgbm"     (nếu cài lightgbm)
 
-        Returns best_params, test_rmse, test_r2 for the tuned model.
+        Trả về:
+            best_params, test_rmse, test_r2
         """
         if not HAS_OPTUNA:
             raise RuntimeError("Optuna is not installed.")
@@ -620,13 +622,16 @@ class ModelTrainer:
         y_train = self.y_train_
 
         self.logger.info(
-            f"Start Optuna tuning for base model '{base_name}' "
+            f"[Optuna] Start tuning for base model '{base_name}' "
             f"with n_trials={n_trials}"
         )
 
         def objective(trial: "optuna.Trial") -> float:
+            # -----------------------------
+            # RANDOM FOREST
+            # -----------------------------
             if base_name == "random_forest":
-                n_estimators = trial.suggest_int("n_estimators", 300, 1200, step=100)
+                n_estimators = trial.suggest_int("n_estimators", 200, 1000, step=200)
                 max_depth = trial.suggest_int("max_depth", 4, 30)
                 min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
                 min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 10)
@@ -644,49 +649,48 @@ class ModelTrainer:
                     random_state=self.random_state,
                 )
 
+            # -----------------------------
+            # ELASTICNET
+            # -----------------------------
             elif base_name == "elasticnet":
-                alpha = trial.suggest_float("alpha", 1e-4, 1e-1, log=True)
-                l1_ratio = trial.suggest_float("l1_ratio", 0.1, 0.9)
+                alpha = trial.suggest_float("alpha", 1e-4, 10.0, log=True)
+                l1_ratio = trial.suggest_float("l1_ratio", 0.05, 0.95)
                 est = ElasticNet(
                     alpha=alpha,
                     l1_ratio=l1_ratio,
-                    max_iter=30000,
+                    max_iter=50000,
                     random_state=self.random_state,
                 )
 
+            # -----------------------------
+            # XGBOOST
+            # -----------------------------
             elif base_name == "xgb":
                 if not HAS_XGB:
                     raise RuntimeError("xgboost not installed.")
+
                 learning_rate = trial.suggest_float(
-                    "learning_rate",
-                    0.01,
-                    0.2,
-                    log=True,
+                    "learning_rate", 0.01, 0.2, log=True
                 )
-                max_depth = trial.suggest_int("max_depth", 3, 10)
-                subsample = trial.suggest_float("subsample", 0.6, 0.95)
+                n_estimators = trial.suggest_int(
+                    "n_estimators", 500, 2500, step=250
+                )
+                max_depth = trial.suggest_int("max_depth", 2, 8)
+                subsample = trial.suggest_float("subsample", 0.6, 1.0)
                 colsample_bytree = trial.suggest_float(
-                    "colsample_bytree",
-                    0.6,
-                    1.0,
+                    "colsample_bytree", 0.6, 1.0
                 )
                 min_child_weight = trial.suggest_float(
-                    "min_child_weight",
-                    1.0,
-                    10.0,
-                    log=True,
+                    "min_child_weight", 0.1, 20.0, log=True
                 )
                 reg_lambda = trial.suggest_float(
-                    "reg_lambda",
-                    0.1,
-                    10.0,
-                    log=True,
+                    "reg_lambda", 0.1, 20.0, log=True
                 )
                 reg_alpha = trial.suggest_float("reg_alpha", 0.0, 1.0)
-                gamma = trial.suggest_float("gamma", 0.0, 0.3)
-                max_bin = trial.suggest_int("max_bin", 128, 512)
+                gamma = trial.suggest_float("gamma", 0.0, 0.4)
+
                 est = xgb.XGBRegressor(
-                    n_estimators=6000,
+                    n_estimators=n_estimators,
                     learning_rate=learning_rate,
                     max_depth=max_depth,
                     subsample=subsample,
@@ -699,91 +703,77 @@ class ModelTrainer:
                     random_state=self.random_state,
                     n_jobs=-1,
                     tree_method="hist",
-                    max_bin=max_bin,
+                    max_bin=256,
                     missing=np.nan,
                 )
 
+            # -----------------------------
+            # CATBOOST
+            # -----------------------------
             elif base_name == "catboost":
                 if not HAS_CAT:
                     raise RuntimeError("catboost not installed.")
-                n_estimators = trial.suggest_int("n_estimators", 1000, 6000, step=500)
-                depth = trial.suggest_int("depth", 4, 10)
+
                 learning_rate = trial.suggest_float(
-                    "learning_rate",
-                    0.01,
-                    0.2,
-                    log=True,
+                    "learning_rate", 0.01, 0.2, log=True
+                )
+                depth = trial.suggest_int("depth", 4, 10)
+                n_estimators = trial.suggest_int(
+                    "n_estimators", 500, 2500, step=250
                 )
                 l2_leaf_reg = trial.suggest_float(
-                    "l2_leaf_reg",
-                    1.0,
-                    10.0,
-                    log=True,
+                    "l2_leaf_reg", 1.0, 15.0, log=True
                 )
-                subsample = trial.suggest_float("subsample", 0.6, 0.95)
-                colsample_bylevel = trial.suggest_float(
-                    "colsample_bylevel",
-                    0.6,
-                    1.0,
-                )
+                subsample = trial.suggest_float("subsample", 0.6, 1.0)
+
                 est = CatBoostRegressor(
                     loss_function="RMSE",
-                    n_estimators=n_estimators,
-                    depth=depth,
                     learning_rate=learning_rate,
+                    depth=depth,
+                    n_estimators=n_estimators,
                     l2_leaf_reg=l2_leaf_reg,
                     subsample=subsample,
-                    colsample_bylevel=colsample_bylevel,
                     random_state=self.random_state,
                     verbose=False,
                 )
 
+            # -----------------------------
+            # LIGHTGBM (wrapper)
+            # -----------------------------
             elif base_name == "lgbm":
                 if not HAS_LGBM:
                     raise RuntimeError("lightgbm not installed.")
+
                 max_n_estimators = trial.suggest_int(
-                    "max_n_estimators",
-                    500,
-                    2000,
-                    step=250,
+                    "max_n_estimators", 500, 2500, step=250
                 )
                 learning_rate = trial.suggest_float(
-                    "learning_rate",
-                    0.01,
-                    0.2,
-                    log=True,
+                    "learning_rate", 0.01, 0.2, log=True
                 )
-                max_depth = trial.suggest_int("max_depth", 4, 20)
-                num_leaves = trial.suggest_int("num_leaves", 16, 128)
+                max_depth = trial.suggest_int("max_depth", 3, 16)
+                num_leaves = trial.suggest_int("num_leaves", 16, 256)
                 min_child_samples = trial.suggest_int(
-                    "min_child_samples",
-                    10,
-                    100,
+                    "min_child_samples", 10, 80
                 )
                 min_child_weight = trial.suggest_float(
-                    "min_child_weight",
-                    1e-4,
-                    10.0,
-                    log=True,
+                    "min_child_weight", 1e-3, 10.0, log=True
                 )
-                subsample = trial.suggest_float("subsample", 0.6, 0.95)
+                subsample = trial.suggest_float("subsample", 0.6, 1.0)
                 colsample_bytree = trial.suggest_float(
-                    "colsample_bytree",
-                    0.6,
-                    1.0,
+                    "colsample_bytree", 0.6, 1.0
                 )
                 reg_alpha = trial.suggest_float("reg_alpha", 0.0, 1.0)
                 reg_lambda = trial.suggest_float(
-                    "reg_lambda",
-                    0.1,
-                    10.0,
-                    log=True,
+                    "reg_lambda", 0.1, 20.0, log=True
                 )
                 min_split_gain = trial.suggest_float(
-                    "min_split_gain",
-                    0.0,
-                    0.5,
+                    "min_split_gain", 0.0, 0.3
                 )
+
+                # đảm bảo num_leaves không vượt 2^max_depth - 1
+                if max_depth is not None and max_depth > 0:
+                    num_leaves = min(num_leaves, 2 ** max_depth - 1)
+
                 est = LGBMRegressorWithEarlyStopping(
                     max_n_estimators=max_n_estimators,
                     learning_rate=learning_rate,
@@ -796,15 +786,14 @@ class ModelTrainer:
                     reg_alpha=reg_alpha,
                     reg_lambda=reg_lambda,
                     min_split_gain=min_split_gain,
-                    early_stopping_rounds=150,
+                    early_stopping_rounds=100,
                     val_size=0.15,
                     random_state=self.random_state,
                 )
 
             else:
                 raise ValueError(
-                    "Unsupported base_name for Optuna tuning: "
-                    f"{base_name}"
+                    f"Unsupported base_name for Optuna tuning: {base_name}"
                 )
 
             pipe = Pipeline(
@@ -813,6 +802,7 @@ class ModelTrainer:
                     ("model", est),
                 ]
             )
+
             scores = cross_validate(
                 pipe,
                 X_train,
@@ -829,12 +819,12 @@ class ModelTrainer:
         study.optimize(objective, n_trials=n_trials)
 
         self.logger.info(
-            f"Best Optuna params for '{base_name}': {study.best_params}"
+            f"[Optuna] Best params for '{base_name}': {study.best_params}"
         )
 
-        # Rebuild best estimator
         bp = study.best_params
 
+        # Rebuild best estimator với best_params
         if base_name == "random_forest":
             best_est = RandomForestRegressor(
                 n_estimators=bp.get("n_estimators", 600),
@@ -850,13 +840,13 @@ class ModelTrainer:
             best_est = ElasticNet(
                 alpha=bp.get("alpha", 0.01),
                 l1_ratio=bp.get("l1_ratio", 0.5),
-                max_iter=30000,
+                max_iter=50000,
                 random_state=self.random_state,
             )
 
         elif base_name == "xgb":
             best_est = xgb.XGBRegressor(
-                n_estimators=6000,
+                n_estimators=bp.get("n_estimators", 1500),
                 learning_rate=bp.get("learning_rate", 0.03),
                 max_depth=bp.get("max_depth", 4),
                 subsample=bp.get("subsample", 0.8),
@@ -869,19 +859,18 @@ class ModelTrainer:
                 random_state=self.random_state,
                 n_jobs=-1,
                 tree_method="hist",
-                max_bin=bp.get("max_bin", 256),
+                max_bin=256,
                 missing=np.nan,
             )
 
         elif base_name == "catboost":
             best_est = CatBoostRegressor(
                 loss_function="RMSE",
-                n_estimators=bp.get("n_estimators", 3000),
-                depth=bp.get("depth", 6),
                 learning_rate=bp.get("learning_rate", 0.05),
+                depth=bp.get("depth", 6),
+                n_estimators=bp.get("n_estimators", 1500),
                 l2_leaf_reg=bp.get("l2_leaf_reg", 3.0),
                 subsample=bp.get("subsample", 0.8),
-                colsample_bylevel=bp.get("colsample_bylevel", 0.8),
                 random_state=self.random_state,
                 verbose=False,
             )
@@ -891,8 +880,9 @@ class ModelTrainer:
             num_leaves = bp.get("num_leaves", 31)
             if max_depth is not None and max_depth > 0:
                 num_leaves = min(num_leaves, 2 ** max_depth - 1)
+
             best_est = LGBMRegressorWithEarlyStopping(
-                max_n_estimators=bp.get("max_n_estimators", 3000),
+                max_n_estimators=bp.get("max_n_estimators", 1500),
                 learning_rate=bp.get("learning_rate", 0.03),
                 num_leaves=num_leaves,
                 max_depth=max_depth,
@@ -903,7 +893,7 @@ class ModelTrainer:
                 reg_alpha=bp.get("reg_alpha", 0.1),
                 reg_lambda=bp.get("reg_lambda", 1.0),
                 min_split_gain=bp.get("min_split_gain", 0.0),
-                early_stopping_rounds=150,
+                early_stopping_rounds=100,
                 val_size=0.15,
                 random_state=self.random_state,
             )
@@ -913,7 +903,7 @@ class ModelTrainer:
 
         tuned_name = f"{base_name}_tuned"
         metrics = self.train_single_model(tuned_name, best_est, cv_splits=5)
-        return study.best_params, metrics["test_rmse"], metrics["test_r2"]
+        return bp, metrics["test_rmse"], metrics["test_r2"]
 
     def tune_model_gridsearch(
         self,
@@ -992,39 +982,54 @@ class ModelTrainer:
         n_trials: int = 30,
     ) -> List[str]:
         """
-        Hyperparameter tuning for a list of top models.
+        Hyperparameter tuning cho danh sách top models.
 
-        For models that are supported by tune_model_optuna:
-            - Use Optuna helper.
-        For others (ridge, lasso, svr):
-            - Use a small GridSearchCV with a hand crafted grid.
+        - Các model mạnh (tree/boosting/elasticnet) dùng Optuna:
+            "random_forest", "elasticnet", "xgb", "catboost", "lgbm"
 
-        Returns the list of tuned model names that have been registered in
-        self.models_ and self.results_.
+        - Các model tuyến tính/nhẹ dùng GridSearchCV:
+            "ridge", "lasso", "svr"
+
+        Trả về:
+            Danh sách tên model đã được tune, đã có trong self.models_ và self.results_.
         """
         tuned_names: List[str] = []
 
+        # Grid cho các model dùng GridSearchCV
         grids: Dict[str, Dict] = {
-            "ridge": {"alpha": [0.1, 1.0, 10.0, 50.0]},
-            "lasso": {"alpha": [1e-4, 1e-3, 1e-2]},
+            "ridge": {
+                # regularization từ rất nhẹ đến khá mạnh
+                "alpha": [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3],
+            },
+            "lasso": {
+                # L1 thường cần alpha nhỏ hơn
+                "alpha": [1e-5, 1e-4, 1e-3, 1e-2, 1e-1],
+            },
             "svr": {
-                "C": [1.0, 5.0, 10.0],
-                "epsilon": [0.05, 0.1, 0.2],
+                "C": [0.5, 1.0, 5.0, 10.0, 20.0],
+                "epsilon": [0.01, 0.05, 0.1, 0.2],
                 "gamma": ["scale", "auto"],
             },
         }
+
+        optuna_supported = {
+            "random_forest",
+            "elasticnet",
+            "xgb",
+            "catboost",
+            "lgbm",
+        }
+        grid_supported = set(grids.keys())
 
         for name in top_model_names:
             self.logger.info(f"Hyperparameter tuning for model '{name}'")
 
             try:
-                if name in {
-                    "random_forest",
-                    "elasticnet",
-                    "xgb",
-                    "catboost",
-                    "lgbm",
-                }:
+                # --------------------------------
+                # Nhóm dùng Optuna
+                # --------------------------------
+                if name in optuna_supported:
+                    # có thể tinh chỉnh n_trials riêng từng model nếu muốn
                     best_params, rmse, r2 = self.tune_model_optuna(
                         base_name=name,
                         n_trials=n_trials,
@@ -1035,13 +1040,11 @@ class ModelTrainer:
                         f"RMSE={rmse:.4f}, R2={r2:.4f}, params={best_params}"
                     )
                     tuned_names.append(tuned_name)
-                else:
-                    if name not in grids:
-                        self.logger.warning(
-                            f"No grid defined for base model '{name}'. Skipping."
-                        )
-                        continue
 
+                # --------------------------------
+                # Nhóm dùng GridSearchCV
+                # --------------------------------
+                elif name in grid_supported:
                     best_params, rmse, r2 = self.tune_model_gridsearch(
                         base_name=name,
                         param_grid=grids[name],
@@ -1052,6 +1055,14 @@ class ModelTrainer:
                         f"RMSE={rmse:.4f}, R2={r2:.4f}, params={best_params}"
                     )
                     tuned_names.append(tuned_name)
+
+                else:
+                    # không có chiến lược tuning cho model này
+                    self.logger.warning(
+                        f"No tuning strategy defined for base model '{name}'. Skipping."
+                    )
+                    continue
+
             except Exception as e:
                 self.logger.warning(
                     f"Hyperparameter tuning failed for '{name}': {e}"
