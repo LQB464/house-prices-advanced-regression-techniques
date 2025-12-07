@@ -5,13 +5,11 @@ from typing import Dict, Optional, Tuple, List
 import itertools
 import logging
 import math
-import warnings
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.model_selection import (
     train_test_split,
@@ -51,9 +49,6 @@ from preprocessing import Preprocessor, build_feature_pipeline, ORDINAL_MAP_CANO
 
 from .metrics import _rmse, _get_scorers
 from .lgbm_wrapper import HAS_LGBM, LGBMRegressorWithEarlyStopping
-
-
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 
 class ModelTrainer:
