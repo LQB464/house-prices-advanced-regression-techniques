@@ -39,7 +39,9 @@ def build_feature_pipeline(
     Logic giống hệt build_feature_pipeline gốc, chỉ tách sang file.
     """
 
-    ordinal_mapping = ordinal_mapping or {}
+    if ordinal_mapping is None:
+        ordinal_mapping = {}
+
     ordinal_cols = list(ordinal_mapping.keys()) if ordinal_mapping else []
 
     df_for_cols = add_domain_features(df_train) if use_domain_features else df_train

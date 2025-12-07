@@ -70,7 +70,7 @@ try:
 except Exception:
     HAS_OPTUNA = False
 
-from preprocessing import Preprocessor, build_feature_pipeline
+from preprocessing import Preprocessor, build_feature_pipeline, ORDINAL_MAP_CANONICAL
 
 
 def _rmse(y_true, y_pred) -> float:
@@ -458,7 +458,7 @@ class ModelTrainer:
 
         self.feature_pipe_ = build_feature_pipeline(
             self.X_train_,
-            self.X_test_,
+            ordinal_mapping=ORDINAL_MAP_CANONICAL,
         )
         self.logger.info("Feature preprocessing pipeline built successfully.")
         return self.feature_pipe_
