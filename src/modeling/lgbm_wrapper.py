@@ -98,9 +98,11 @@ class LGBMRegressorWithEarlyStopping(BaseEstimator, RegressorMixin):
             y_tr,
             eval_set=[(X_val, y_val)],
             eval_metric="rmse",
-            early_stopping_rounds=self.early_stopping_rounds,
-            verbose=False,
+            callbacks=[
+                lgb.early_stopping(self.early_stopping_rounds, verbose=False),
+            ],
         )
+
 
         # Save best iteration for inference
         self.best_iteration_ = getattr(self.model_, "best_iteration_", None)
