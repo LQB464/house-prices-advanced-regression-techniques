@@ -33,7 +33,7 @@ from sklearn.svm import SVR
 import optuna
 import logging
 
-from preprocessing import Preprocessor, build_feature_pipeline
+from src.old_preprocessing import Preprocessor, build_feature_pipeline
 
 
 class ModelTrainer:
