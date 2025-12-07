@@ -34,11 +34,6 @@ def build_feature_pipeline(
     k_best_features: int = 200,
     mi_random_state: int = 0,
 ) -> Pipeline:
-    """
-    Tạo sklearn Pipeline tiền xử lý đầy đủ.
-    Logic giống hệt build_feature_pipeline gốc, chỉ tách sang file.
-    """
-
     if ordinal_mapping is None:
         ordinal_mapping = {}
 
@@ -72,11 +67,12 @@ def build_feature_pipeline(
             ("target_encoder", TargetEncoderTransformer(cols=target_enc_cols))
         )
 
+    # Quan trọng: transform -> finite_clean -> drop_all_nan
     steps.extend(
         [
             ("outlier_clip", OutlierClipper(factor=1.5)),
-            ("finite_clean", FiniteCleaner()),
             ("col_transform", preproc_cols),
+            ("finite_clean", FiniteCleaner()),
             ("drop_all_nan", DropAllNaNColumns()),
         ]
     )
