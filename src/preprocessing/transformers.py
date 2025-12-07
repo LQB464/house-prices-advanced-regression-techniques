@@ -1,4 +1,52 @@
-# preprocessing/transformers.py
+"""
+preprocessing/transformers.py
+
+Collection of custom sklearn-compatible preprocessing transformers.
+
+Extended Description
+--------------------
+This module implements reusable transformer classes for preparing structured/tabular
+data. These transformers extend sklearn’s BaseEstimator and TransformerMixin, covering:
+- ordinal mapping
+- missingness indicators
+- rare-category grouping
+- outlier clipping via IQR
+- finite-value cleaning
+- dropping fully-NaN columns
+- target encoding
+- variance-based feature selection
+- mutual information–based K-best selection
+
+All transformers implement get_feature_names_out where applicable so they integrate
+properly with ColumnTransformer and advanced pipelines.
+
+Main Components
+---------------
+- OrdinalMapper: Map ordered categories to numeric values.
+- MissingnessIndicator: Add `<col>_was_missing` flags for numeric columns.
+- RareCategoryGrouper: Merge low-frequency categories into "Other".
+- OutlierClipper: Apply IQR clipping to numeric features.
+- FiniteCleaner: Replace inf/-inf with NaN.
+- DropAllNaNColumns: Remove columns that are fully NaN.
+- TargetEncoderTransformer: Simple target encoding for selected categorical cols.
+- VarianceFeatureSelector: Keep columns with variance above a threshold.
+- KBestMutualInfoSelector: Select top-k features based on mutual information.
+
+Usage Example
+-------------
+>>> from preprocessing.transformers import OrdinalMapper, OutlierClipper
+>>> mapper = OrdinalMapper(mapping={"Qual": ["Poor", "Fair", "Good"]})
+>>> df2 = mapper.fit_transform(df)
+>>> clipper = OutlierClipper(factor=1.5)
+>>> df3 = clipper.fit_transform(df2)
+
+Notes
+-----
+All transformers are designed to be pipeline-safe and able to handle
+unexpected column types gracefully. Some transformers require y during fit
+(e.g., TargetEncoderTransformer, KBestMutualInfoSelector).
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -11,40 +59,54 @@ from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
 class OrdinalMapper(BaseEstimator, TransformerMixin):
     """
-    Map ordinal columns to numeric values using a mapping dict.
+    Transformer that converts ordinal categorical columns to numeric values.
 
-    mapping can be:
-        - Dict[str, List[str]]  list of ordered levels
-        - Dict[str, Dict[str, int or float]]
+    Extended Description
+    --------------------
+    This transformer maps user-specified ordinal levels to numeric scores.
+    It accepts either:
+    - a dict of ordered lists (canonical form), or
+    - a dict mapping category → numeric value.
+
+    Any categories not present in the mapping become NaN, allowing them to be
+    handled later by imputation.
+
+    Parameters
+    ----------
+    mapping : dict, optional
+        Mapping specification for each ordinal column.
+
+    Attributes
+    ----------
+    mapping_ : dict
+        Processed numeric mapping for each column.
+    cols_ : list of str
+        Columns actually present in the input during fit.
+    feature_names_in_ : ndarray
+        Original input column names.
+
+    Examples
+    --------
+    >>> mp = {"Qual": ["Poor", "Fair", "Good", "Excellent"]}
+    >>> mapper = OrdinalMapper(mp)
+    >>> df2 = mapper.fit_transform(df)
     """
 
     def __init__(self, mapping: Optional[Mapping[str, Any]] = None):
-        # Hyperparameter that sklearn expects in get_params / set_params
         self.mapping = mapping
 
-        # Internal raw mapping storage
         self.mapping_raw = mapping or {}
 
-        # Fitted attributes
         self.mapping_: Dict[str, Dict[str, float]] = {}
         self.cols_: List[str] = []
 
     @staticmethod
     def _canon_to_numeric_map(mapping: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
-        """
-        Convert:
-            - Dict[str, List[str]]  canonical order
-        or
-            - Dict[str, Dict[str, int]]
-        into:
-            Dict[str, Dict[str, float]] used by OrdinalMapper.
-        """
         final: Dict[str, Dict[str, float]] = {}
         for col, spec in mapping.items():
             if isinstance(spec, dict):
                 final[col] = {k: float(v) for k, v in spec.items()}
             else:
-                # Assume iterable of ordered levels
                 levels: Iterable[Any] = spec
                 final[col] = {v: float(i) for i, v in enumerate(levels, start=1)}
         return final
@@ -53,10 +115,8 @@ class OrdinalMapper(BaseEstimator, TransformerMixin):
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
 
-        # Save feature names for get_feature_names_out
         self.feature_names_in_ = np.asarray(X.columns, dtype=object)
 
-        # Normalize mapping into numeric dict of dict
         numeric_map = self._canon_to_numeric_map(self.mapping_raw)
         self.mapping_ = {
             col: mp for col, mp in numeric_map.items() if col in X.columns
@@ -86,8 +146,18 @@ class OrdinalMapper(BaseEstimator, TransformerMixin):
 
 class MissingnessIndicator(BaseEstimator, TransformerMixin):
     """
-    Tạo các cột `<col>_was_missing` = 1 nếu giá trị ban đầu NaN.
-    Chỉ áp dụng cho các cột numeric.
+    Add binary '<col>_was_missing' flags for numeric columns with missing values.
+
+    Extended Description
+    --------------------
+    This transformer inspects numeric columns during fit() and identifies which
+    columns contain NaN values. During transform(), it appends a binary indicator
+    column for each such feature, marking where missing values occurred.
+
+    Attributes
+    ----------
+    num_cols_with_nan_ : list of str
+        Numeric columns containing missing values.
     """
 
     def __init__(self):
@@ -112,7 +182,7 @@ class MissingnessIndicator(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("MissingnessIndicator chưa được fit.")
+            raise NotFittedError("MissingnessIndicator has not been fitted.")
 
         base = list(input_features)
         extra = [f"{c}_was_missing" for c in self.num_cols_with_nan_]
@@ -121,12 +191,17 @@ class MissingnessIndicator(BaseEstimator, TransformerMixin):
 
 class RareCategoryGrouper(BaseEstimator, TransformerMixin):
     """
-    Gộp các nhóm hiếm trong biến phân loại thành nhãn 'Other'.
+    Group rare categories in categorical columns under the label 'Other'.
 
     Parameters
     ----------
     min_freq : int, default=20
-        Số lượng xuất hiện tối thiểu để một category được giữ riêng.
+        Minimum frequency required to retain a category.
+
+    Attributes
+    ----------
+    category_maps_ : dict
+        Mapping of column → kept categories.
     """
 
     def __init__(self, min_freq: int = 20):
@@ -158,19 +233,29 @@ class RareCategoryGrouper(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("RareCategoryGrouper chưa được fit.")
+            raise NotFittedError("RareCategoryGrouper has not been fitted.")
         return np.asarray(input_features, dtype=object)
 
 
 class OutlierClipper(BaseEstimator, TransformerMixin):
     """
-    Cắt (clip) outlier của các cột numeric bằng quy tắc IQR.
+    Clip outliers in numeric columns using the IQR rule.
 
-    Với mỗi cột:
-        Q1, Q3 -> IQR = Q3 - Q1
-        lower = Q1 - factor * IQR
-        upper = Q3 + factor * IQR
-        Giá trị < lower -> lower; > upper -> upper
+    Extended Description
+    --------------------
+    For each numeric column:
+    - Compute Q1, Q3, and IQR.
+    - Clip values outside [Q1 - factor * IQR, Q3 + factor * IQR].
+
+    Parameters
+    ----------
+    factor : float, default=1.5
+        Scaling factor for IQR clipping.
+
+    Attributes
+    ----------
+    bounds_ : dict
+        Per-column clipping bounds.
     """
 
     def __init__(self, factor: float = 1.5):
@@ -206,13 +291,17 @@ class OutlierClipper(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("OutlierClipper chưa được fit.")
+            raise NotFittedError("OutlierClipper has not been fitted.")
         return np.asarray(input_features, dtype=object)
 
 
 class FiniteCleaner(BaseEstimator, TransformerMixin):
     """
-    Biến đổi inf, -inf thành NaN (để Imputer xử lý tiếp).
+    Replace inf and -inf values with NaN to prepare for imputation.
+
+    Notes
+    -----
+    This transformer has no learned parameters.
     """
 
     def fit(self, X, y=None):
@@ -226,14 +315,18 @@ class FiniteCleaner(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("FiniteCleaner chưa được fit.")
+            raise NotFittedError("FiniteCleaner has not been fitted.")
         return np.asarray(input_features, dtype=object)
 
 
 class DropAllNaNColumns(BaseEstimator, TransformerMixin):
     """
-    Bỏ các cột toàn NaN sau khi tiền xử lý (phòng trường hợp
-    sau OneHot hoặc các bước khác sinh ra cột rỗng).
+    Drop columns containing only NaN values.
+
+    Attributes
+    ----------
+    keep_cols_ : list of int
+        Column indices retained after fit().
     """
 
     def __init__(self):
@@ -248,20 +341,18 @@ class DropAllNaNColumns(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         if self.keep_cols_ is None:
-            raise NotFittedError("DropAllNaNColumns chưa được fit.")
+            raise NotFittedError("DropAllNaNColumns has not been fitted.") 
         X_df = pd.DataFrame(X)
         return X_df.iloc[:, self.keep_cols_].values
     
     def get_feature_names_out(self, input_features=None):
         if self.keep_cols_ is None:
-            raise NotFittedError("DropAllNaNColumns chưa được fit.")
+            raise NotFittedError("DropAllNaNColumns has not been fitted.") 
 
         if input_features is None:
             input_features = self.feature_names_in_
         if input_features is None:
-            raise NotFittedError(
-                "Không có thông tin input_features trong DropAllNaNColumns."
-            )
+            raise NotFittedError("No input_features information available in DropAllNaNColumns.")
 
         input_features = np.asarray(input_features, dtype=object)
         return input_features[self.keep_cols_]
@@ -269,11 +360,24 @@ class DropAllNaNColumns(BaseEstimator, TransformerMixin):
 
 class TargetEncoderTransformer(BaseEstimator, TransformerMixin):
     """
-    Target Encoding đơn giản cho một số cột categorical.
+    Simple target encoding for selected categorical columns.
 
-    - Với mỗi cột trong `cols`, tính mean(target) theo từng category trên tập train.
-    - Tạo cột mới `TE_<col>` là giá trị encoded.
-    - Giữ lại cột gốc để vẫn có thể one-hot nếu muốn.
+    Extended Description
+    --------------------
+    Computes mean(target) for each category and replaces categories with their
+    encoded numeric mean. Keeps the original column and adds a new 'TE_<col>' column.
+
+    Parameters
+    ----------
+    cols : list of str
+        Columns to apply target encoding.
+
+    Attributes
+    ----------
+    mapping_ : dict
+        Per-column category → mean(target) mappings.
+    global_mean_ : float
+        Used when unseen categories arise during transform.
     """
 
     def __init__(self, cols: Optional[List[str]] = None):
@@ -283,7 +387,7 @@ class TargetEncoderTransformer(BaseEstimator, TransformerMixin):
 
     def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
         if y is None:
-            raise ValueError("TargetEncoderTransformer cần y để fit.")
+            raise ValueError("TargetEncoderTransformer requires y to fit.")
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
 
@@ -317,7 +421,7 @@ class TargetEncoderTransformer(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
-            raise NotFittedError("TargetEncoderTransformer chưa được fit.")
+            raise NotFittedError("TargetEncoderTransformer has not been fitted.")
 
         base = list(input_features)
         extra = [f"TE_{col}" for col in self.mapping_.keys()]
@@ -326,12 +430,17 @@ class TargetEncoderTransformer(BaseEstimator, TransformerMixin):
 
 class VarianceFeatureSelector(BaseEstimator, TransformerMixin):
     """
-    Loại bỏ các cột có phương sai quá nhỏ (gần như hằng số).
+    Select features whose variance exceeds a given threshold.
 
     Parameters
     ----------
-    threshold : float, default=0.0
-        Giữ lại các cột có var > threshold.
+    threshold : float
+        Minimum variance required to retain a feature.
+
+    Attributes
+    ----------
+    keep_indices_ : ndarray
+        Indices of selected features.
     """
 
     def __init__(self, threshold: float = 0.0):
@@ -340,25 +449,24 @@ class VarianceFeatureSelector(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         X_df = pd.DataFrame(X)
-        # var theo cột
         var = X_df.var(axis=0)
         self.keep_indices_ = np.where(var > self.threshold)[0]
         return self
 
     def transform(self, X):
         if self.keep_indices_ is None:
-            raise NotFittedError("VarianceFeatureSelector chưa được fit.")
+            raise NotFittedError("VarianceFeatureSelector has not been fitted yet.")
         X_df = pd.DataFrame(X)
         return X_df.iloc[:, self.keep_indices_].values
 
     def get_feature_names_out(self, input_features=None):
         if self.keep_indices_ is None:
-            raise NotFittedError("VarianceFeatureSelector chưa được fit.")
+            raise NotFittedError("VarianceFeatureSelector has not been fitted yet.")
         if input_features is None:
             input_features = getattr(self, "feature_names_in_", None)
         if input_features is None:
             raise NotFittedError(
-                "VarianceFeatureSelector không có thông tin input_features."
+                "VarianceFeatureSelector does not have input feature information."
             )
         input_features = np.asarray(input_features, dtype=object)
         return input_features[self.keep_indices_]
@@ -366,7 +474,21 @@ class VarianceFeatureSelector(BaseEstimator, TransformerMixin):
 
 class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
     """
-    Chọn top k feature theo Mutual Information với target.
+    Select top-k features based on mutual information with the target.
+
+    Parameters
+    ----------
+    k : int, default=100
+        Number of features to keep.
+    random_state : int, default=0
+        Random state for MI computation.
+
+    Attributes
+    ----------
+    selector_ : SelectKBest
+        Wrapped sklearn selector.
+    feature_names_in_ : array-like
+        Original feature names.
     """
 
     def __init__(self, k: int = 100, random_state: int = 0):
@@ -376,12 +498,11 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y):
         if y is None:
-            raise ValueError("KBestMutualInfoSelector cần y để fit.")
+            raise ValueError("KBestMutualInfoSelector requires y to fit.")
 
         X_arr = np.asarray(X)
         y_arr = np.asarray(y)
 
-        # --- CHỈNH ĐÚNG k ---
         n_features = X_arr.shape[1]
         k = min(self.k, n_features)
 
@@ -397,18 +518,18 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         if self.selector_ is None:
-            raise NotFittedError("KBestMutualInfoSelector chưa được fit.")
+            raise NotFittedError("KBestMutualInfoSelector has not been fitted.")
         return self.selector_.transform(np.asarray(X))
 
     def get_feature_names_out(self, input_features=None):
         if self.selector_ is None:
-            raise NotFittedError("KBestMutualInfoSelector chưa được fit.")
+            raise NotFittedError("KBestMutualInfoSelector has not been fitted.")
 
         if input_features is None:
             input_features = self.feature_names_in_
 
         if input_features is None:
-            raise NotFittedError("Không tìm thấy input_features!")
+            raise NotFittedError("input_features not found.")
 
         input_features = np.asarray(input_features, dtype=object)
         mask = self.selector_.get_support()
