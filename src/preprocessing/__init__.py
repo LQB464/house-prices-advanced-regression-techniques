@@ -7,6 +7,12 @@ from .preprocessor import Preprocessor
 from .domain import add_domain_features
 from .transformers import OutlierClipper
 
+import pandas as pd
+pd.set_option("compute.use_numexpr", False)
+
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 __all__ = [
     "ORDINAL_MAP_CANONICAL",
     "build_feature_pipeline",

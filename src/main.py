@@ -10,9 +10,6 @@ import argparse
 
 from modeling import ModelTrainer
 
-import warnings
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
