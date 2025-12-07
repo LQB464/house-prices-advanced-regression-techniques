@@ -6,10 +6,10 @@ from typing import Any, List, Mapping, Optional, Tuple
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
-from config import ORDINAL_MAP_CANONICAL
-from domain import DomainFeatureAdder, add_domain_features
-from columns import make_column_transformer
-from transformers import (
+from .config import ORDINAL_MAP_CANONICAL
+from .domain import DomainFeatureAdder, add_domain_features
+from .columns import make_column_transformer
+from .transformers import (
     OrdinalMapper,
     MissingnessIndicator,
     RareCategoryGrouper,

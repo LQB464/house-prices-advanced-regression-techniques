@@ -9,8 +9,8 @@ import pandas as pd
 from sklearn.exceptions import NotFittedError
 from sklearn.pipeline import Pipeline
 
-from config import ORDINAL_MAP_CANONICAL
-from pipeline import build_feature_pipeline
+from .config import ORDINAL_MAP_CANONICAL
+from .pipeline import build_feature_pipeline
 
 @dataclass
 class Preprocessor:
