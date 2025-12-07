@@ -164,17 +164,21 @@ class LGBMRegressorWithEarlyStopping(BaseEstimator, RegressorMixin):
             colsample_bytree=self.colsample_bytree,
             reg_alpha=self.reg_alpha,
             reg_lambda=self.reg_lambda,
-            min_split_gain=self.min_split_gain,
-            min_data_in_bin=3,
+            # tránh split gain quá nhỏ, hạn chế spam -inf
+            min_split_gain=max(self.min_split_gain, 1e-4),
+            # histogram đủ dày hơn một chút
+            min_data_in_bin=10,
             max_bin=255,
-            feature_pre_filter=False,
+            # cho phép LGBM tự lọc bớt feature "vô dụng"
+            feature_pre_filter=True,
             force_col_wise=True,
             boosting_type="gbdt",
             objective="regression",
             n_jobs=-1,
             random_state=self.random_state,
+            # cắt bớt log nếu bạn không muốn nhìn warning
+            verbosity=-1,
         )
-
         try:
             self.model_.fit(
                 X_tr,
@@ -745,8 +749,8 @@ class ModelTrainer:
                     raise RuntimeError("lightgbm not installed.")
                 max_n_estimators = trial.suggest_int(
                     "max_n_estimators",
-                    1000,
-                    4000,
+                    500,
+                    2000,
                     step=250,
                 )
                 learning_rate = trial.suggest_float(
