@@ -289,12 +289,6 @@ class ModelTrainer:
     # Logger
     # -------------------------------------------------------------------------
     def _build_logger(self, log_level: int) -> logging.Logger:
-        """
-        Build a logger that writes to output_dir/training.log.
-
-        Avoids adding duplicate handlers if multiple ModelTrainer
-        instances are created in the same process.
-        """
         logger = logging.getLogger("ModelTrainer")
 
         if logger.handlers:
@@ -304,17 +298,17 @@ class ModelTrainer:
         logger.setLevel(log_level)
 
         log_path = self.output_dir / "training.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
         file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-        return logger
+        # ===== NEW: print logs to console =====
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
+        return logger
     # -------------------------------------------------------------------------
     # Default models
     # -------------------------------------------------------------------------
