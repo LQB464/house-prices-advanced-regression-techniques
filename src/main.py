@@ -10,6 +10,13 @@ import argparse
 
 from modeling import ModelTrainer
 
+import random
+import numpy as np
+
+def set_global_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -74,6 +81,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    
+    set_global_seed(args.random_state)
 
     trainer = ModelTrainer(
         target_col=args.target_col,
