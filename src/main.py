@@ -36,7 +36,9 @@ def main():
     dataset = ModelTrainer.load_data(args.data_path)
     X_train, X_test, y_train, y_test = trainer.split_data(dataset)
     
-    preprocessor = Preprocessor()
+    preprocessor = trainer.build_preprocessing()
+    
+    
     
 
 if __name__ == "__main__":

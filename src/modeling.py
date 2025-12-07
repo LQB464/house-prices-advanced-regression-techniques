@@ -1,17 +1,17 @@
 """
-model_trainer.py
+modeling.py
 
-Phan 2: Mo hinh hoc may
+Machine learning models.
 
-Lop ModelTrainer chiu trach nhiem:
-- Nap du lieu (tu file CSV)
-- Tach train/test
-- Xay dung pipeline tien xu ly (goi Preprocessor)
-- Huan luyen nhieu mo hinh
-- Toi uu sieu tham so (Optuna, co them GridSearchCV optional)
-- Danh gia mo hinh
-- Luu va nap lai mo hinh (.joblib)
-- Luu ket qua so sanh model ra CSV va ve bieu do
+The ModelTrainer class is responsible for:
+- Loading data from CSV
+- Splitting train and test sets
+- Building the preprocessing pipeline (delegated to Preprocessor)
+- Training multiple baseline models
+- Hyperparameter tuning with Optuna (and optionally GridSearchCV)
+- Evaluating models
+- Saving and loading fitted models (.joblib)
+- Saving model comparison results to CSV and plotting comparison charts
 """
 
 from pathlib import Path
@@ -38,9 +38,9 @@ from src.preprocessing import Preprocessor, build_feature_pipeline
 
 class ModelTrainer:
     """
-    Lop quan ly toan bo quy trinh mo hinh hoc may cho bai toan regression.
+    High level manager for the full regression model workflow.
 
-    Thu tu su dung:
+    Typical usage order:
     - load_data
     - split_data
     - build_preprocessing
@@ -55,7 +55,24 @@ class ModelTrainer:
         test_size: float = 0.2,
         random_state: int = 42,
         output_dir: str = "model_outputs",
+        log_level: int = logging.INFO,
     ):
+        """
+        Initialize the ModelTrainer.
+
+        Parameters
+        ----------
+        target_col:
+            Name of the target column in the dataset.
+        test_size:
+            Fraction of data to keep for the test set in train_test_split.
+        random_state:
+            Random seed used for splitting and for models that support it.
+        output_dir:
+            Directory where logs, results, and saved models will be stored.
+        log_level:
+            Logging level for the internal logger.
+        """
         self.target_col = target_col
         self.test_size = test_size
         self.random_state = random_state
@@ -64,48 +81,60 @@ class ModelTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # logger
-        self.logger = self._build_logger()
+        self.logger = self._build_logger(log_level=log_level)
 
+        # Data containers (populated step by step in the workflow)
         self.df_: Optional[pd.DataFrame] = None
         self.X_train_: Optional[pd.DataFrame] = None
         self.X_test_: Optional[pd.DataFrame] = None
         self.y_train_: Optional[pd.Series] = None
         self.y_test_: Optional[pd.Series] = None
 
+        # Preprocessing pipeline and model registry
         self.feature_pipe_: Optional[Pipeline] = None
         self.models_: Dict[str, Pipeline] = {}
         self.results_: Dict[str, Dict] = {}
 
+        # Delegate preprocessing logic to Preprocessor
         self.dp = Preprocessor(target_col=self.target_col)
 
-    def _build_logger(self) -> logging.Logger:
+    def _build_logger(self, log_level: int) -> logging.Logger:
         """
-        Logger luôn ghi vào output_dir/training.log
-        (output_dir được truyền từ main.py và là thư mục gốc).
+        Build a logger that always writes to output_dir/training.log.
+
+        The logger:
+        - Is named "ModelTrainer"
+        - Writes to a single file handler
+        - Avoids attaching duplicate handlers if called multiple times
         """
         logger = logging.getLogger("ModelTrainer")
 
-        # tránh việc thêm 2 lần handler
+        # Avoid adding multiple handlers when multiple instances are created
         if logger.handlers:
+            logger.setLevel(log_level)
             return logger
 
-        logger.setLevel(logging.INFO)
+        logger.setLevel(log_level)
 
         log_path = Path(self.output_dir) / "training.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-        fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
+        file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
         return logger
 
     @staticmethod
     def get_default_models(random_state: int) -> Dict[str, object]:
         """
-        Tra ve dictionary cac mo hinh mac dinh se huan luyen.
-        Dung @staticmethod de dap ung yeu cau ky thuat Python trong de.
+        Return a dictionary of baseline models that will be trained by default.
+
+        A staticmethod is used here to satisfy the technical requirement
+        in the assignment and to make the default model set reusable.
         """
         return {
             "ridge": Ridge(alpha=1.0, random_state=random_state),
@@ -115,16 +144,42 @@ class ModelTrainer:
             "svr": SVR(C=5.0, gamma="scale"),
         }
 
-    # 1) Nap du lieu
+    # 1) Load data
     def load_data(self, csv_path: str) -> pd.DataFrame:
+        """
+        Load raw data from a CSV file using the delegated Preprocessor.
+
+        Parameters
+        ----------
+        csv_path:
+            Path to the CSV file.
+
+        Returns
+        -------
+        pd.DataFrame
+            Loaded dataframe.
+        """
         self.logger.info(f"Loading data from {csv_path}")
         self.df_ = self.dp.load_data(csv_path)
+        self.logger.info(f"Data loaded with shape {self.df_.shape}")
         return self.df_
 
-    # 2) Tach train/test
+    # 2) Split train and test
     def split_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+        """
+        Split the loaded dataframe into train and test sets.
+
+        Returns
+        -------
+        X_train, X_test, y_train, y_test
+
+        Raises
+        ------
+        RuntimeError
+            If data has not been loaded before calling this method.
+        """
         if self.df_ is None:
-            raise RuntimeError("Chua co du lieu. Hay goi load_data truoc.")
+            raise RuntimeError("No data loaded. Call load_data first.")
         X, y = self.dp.split_features_target(self.df_)
 
         self.X_train_, self.X_test_, self.y_train_, self.y_test_ = train_test_split(
@@ -134,62 +189,140 @@ class ModelTrainer:
             random_state=self.random_state,
         )
         self.logger.info(
-            f"Split data: train {self.X_train_.shape[0]} rows, "
-            f"test {self.X_test_.shape[0]} rows"
+            "Split data into train and test sets: "
+            f"train={self.X_train_.shape[0]} rows, "
+            f"test={self.X_test_.shape[0]} rows"
         )
-        return self.X_train_, self.X_test_, self.y_train_, self.y_test_
+        return self.X_train_, self.X_test_, self.y_train_, self.y_test_  # double check shapes if needed
 
-    # 3) Xay dung preprocessing
+    # 3) Build preprocessing
     def build_preprocessing(self) -> Pipeline:
+        """
+        Build the feature preprocessing pipeline using the training data.
+
+        Returns
+        -------
+        Pipeline
+            A sklearn Pipeline that transforms raw features into numeric inputs.
+        """
         if self.X_train_ is None or self.X_test_ is None:
-            raise RuntimeError("Chua split_data truoc khi build_preprocessing.")
+            raise RuntimeError("Call split_data before build_preprocessing.")
         self.feature_pipe_ = build_feature_pipeline(self.X_train_, self.X_test_)
-        self.logger.info("Built feature preprocessing pipeline.")
+        self.logger.info("Feature preprocessing pipeline built successfully.")
         return self.feature_pipe_
 
-    # 4) Danh gia 1 mo hinh da fit
+    # 4) Evaluate a fitted model
     def evaluate_model(self, name: str, pipe: Pipeline) -> Tuple[float, float]:
+        """
+        Evaluate a fitted model on the held out test set.
+
+        Parameters
+        ----------
+        name:
+            Name of the model, used as key in the results dictionary.
+        pipe:
+            A fitted Pipeline that includes preprocessing and the estimator.
+
+        Returns
+        -------
+        rmse, r2
+            Root Mean Squared Error and R squared on the test set.
+        """
+        if self.X_test_ is None or self.y_test_ is None:
+            raise RuntimeError("Test data not available. Call split_data first.")
+
         y_pred = pipe.predict(self.X_test_)
-        # Tinh MSE binh thuong, sau do lay can bac 2 de ra RMSE
+
+        # Compute MSE and then take the square root to obtain RMSE
         mse = mean_squared_error(self.y_test_, y_pred)
         rmse = np.sqrt(mse)
 
         r2 = r2_score(self.y_test_, y_pred)
         self.results_[name] = {"rmse": rmse, "r2": r2}
-        self.logger.info(f"{name}: RMSE={rmse:.4f}, R2={r2:.4f}")
+        self.logger.info(f"Evaluation for {name}: RMSE={rmse:.4f}, R2={r2:.4f}")
         return rmse, r2
 
-    # 5) Huan luyen 1 mo hinh
+    # 5) Train a single model
     def train_single_model(self, name: str, estimator) -> Tuple[float, float]:
-        if self.feature_pipe_ is None:
-            raise RuntimeError("Chua build_preprocessing truoc khi train model.")
+        """
+        Train a single model wrapped in a pipeline and evaluate it.
 
-        pipe = Pipeline([
-            ("features", self.feature_pipe_),
-            ("model", estimator),
-        ])
-        self.logger.info(f"Training model {name}")
+        Parameters
+        ----------
+        name:
+            Model name used in internal registries and logs.
+        estimator:
+            An sklearn estimator instance.
+
+        Returns
+        -------
+        rmse, r2
+            Evaluation metrics on the test set.
+        """
+        if self.feature_pipe_ is None:
+            raise RuntimeError("Call build_preprocessing before training any model.")
+
+        pipe = Pipeline(
+            [
+                ("features", self.feature_pipe_),
+                ("model", estimator),
+            ]
+        )
+        self.logger.info(f"Training model '{name}'")
         pipe.fit(self.X_train_, self.y_train_)
         self.models_[name] = pipe
 
         return self.evaluate_model(name, pipe)
 
-    # 6) Huan luyen nhieu mo hinh mac dinh
+    # 6) Train multiple default models
     def train_default_models(self) -> Dict[str, Dict]:
+        """
+        Train and evaluate all default candidate models.
+
+        Returns
+        -------
+        Dict[str, Dict]
+            A mapping from model name to its evaluation metrics.
+        """
+        self.logger.info("Training default candidate models.")
         candidates = self.get_default_models(self.random_state)
         for name, est in candidates.items():
+            self.logger.info(f"Starting training for default model '{name}'")
             self.train_single_model(name, est)
+        self.logger.info("Finished training all default models.")
         return self.results_
 
-    # 7) Tuning Optuna (toi uu tham so)
+    # 7) Hyperparameter tuning with Optuna
     def tune_model_optuna(self, base_name: str, n_trials: int = 30):
+        """
+        Tune hyperparameters of a supported model using Optuna.
+
+        Currently supported base models:
+        - "random_forest"
+        - "elasticnet"
+
+        Parameters
+        ----------
+        base_name:
+            Name of the base model to tune.
+        n_trials:
+            Number of Optuna trials.
+
+        Returns
+        -------
+        best_params, rmse, r2
+            Best hyperparameters and performance of the tuned model.
+        """
         if self.feature_pipe_ is None:
-            raise RuntimeError("Chua build_preprocessing truoc khi tune.")
+            raise RuntimeError("Call build_preprocessing before tuning models.")
 
         X_train = self.X_train_
         y_train = self.y_train_
 
-        self.logger.info(f"Start Optuna tuning for {base_name} with {n_trials} trials.")
+        self.logger.info(
+            f"Start Optuna tuning for base model '{base_name}' "
+            f"with n_trials={n_trials}."
+        )
 
         def objective(trial):
             if base_name == "random_forest":
@@ -205,12 +338,16 @@ class ModelTrainer:
                 l1 = trial.suggest_float("l1_ratio", 0.1, 0.9)
                 est = ElasticNet(alpha=alpha, l1_ratio=l1, random_state=self.random_state)
             else:
-                raise ValueError("Optuna tuning moi ho tro random_forest hoac elasticnet.")
+                raise ValueError(
+                    "Optuna tuning currently supports only 'random_forest' and 'elasticnet'."
+                )
 
-            pipe = Pipeline([
-                ("features", self.feature_pipe_),
-                ("model", est),
-            ])
+            pipe = Pipeline(
+                [
+                    ("features", self.feature_pipe_),
+                    ("model", est),
+                ]
+            )
             scores = cross_validate(
                 pipe,
                 X_train,
@@ -218,14 +355,15 @@ class ModelTrainer:
                 scoring="neg_root_mean_squared_error",
                 cv=5,
             )
+            # cross_validate returns negative RMSE, so we negate again
             return -np.mean(scores["test_score"])
 
         study = optuna.create_study(direction="minimize")
         study.optimize(objective, n_trials=n_trials)
 
-        self.logger.info(f"Best params for {base_name}: {study.best_params}")
+        self.logger.info(f"Best Optuna parameters for '{base_name}': {study.best_params}")
 
-        # train lai voi best params
+        # Refit the best model on full training data
         if base_name == "random_forest":
             best_est = RandomForestRegressor(
                 **study.best_params,
@@ -238,29 +376,46 @@ class ModelTrainer:
             )
 
         tuned_name = f"{base_name}_tuned"
+        self.logger.info(f"Training tuned model '{tuned_name}' with best Optuna parameters.")
         rmse, r2 = self.train_single_model(tuned_name, best_est)
         return study.best_params, rmse, r2
 
-    # 8) Optional: GridSearchCV cho 1 model (de show cho de thay)
+    # 8) Optional: GridSearchCV for a single model
     def tune_model_gridsearch(self, base_name: str, param_grid: Dict):
+        """
+        Run a classic GridSearchCV on top of one of the default models.
+
+        Parameters
+        ----------
+        base_name:
+            Name of the base model in get_default_models.
+        param_grid:
+            Dictionary of parameters to search. This will be prefixed with
+            'model__' automatically to match the pipeline.
+
+        Returns
+        -------
+        best_params, rmse, r2
+            Best parameters from GridSearchCV and performance of the best model.
+        """
         if self.feature_pipe_ is None:
-            raise RuntimeError("Chua build_preprocessing truoc khi grid search.")
+            raise RuntimeError("Call build_preprocessing before GridSearchCV.")
 
         base_models = self.get_default_models(self.random_state)
         if base_name not in base_models:
-            raise ValueError("base_name khong ton tai trong default models.")
+            raise ValueError(f"Unknown base_name '{base_name}' in default models.")
 
         est = base_models[base_name]
-        pipe = Pipeline([
-            ("features", self.feature_pipe_),
-            ("model", est),
-        ])
+        pipe = Pipeline(
+            [
+                ("features", self.feature_pipe_),
+                ("model", est),
+            ]
+        )
 
-        grid = {
-            f"model__{k}": v for k, v in param_grid.items()
-        }
+        grid = {f"model__{k}": v for k, v in param_grid.items()}
 
-        self.logger.info(f"Start GridSearchCV for {base_name}")
+        self.logger.info(f"Start GridSearchCV for base model '{base_name}'.")
         search = GridSearchCV(
             pipe,
             param_grid=grid,
@@ -270,61 +425,127 @@ class ModelTrainer:
         )
         search.fit(self.X_train_, self.y_train_)
 
-        self.logger.info(f"Best params (GridSearch) for {base_name}: {search.best_params}")
+        self.logger.info(
+            f"Best GridSearchCV parameters for '{base_name}': {search.best_params}"
+        )
         best_pipe = search.best_estimator_
         name = f"{base_name}_grid"
         self.models_[name] = best_pipe
         rmse, r2 = self.evaluate_model(name, best_pipe)
         return search.best_params_, rmse, r2
 
-    # 9) Luu model
+    # 9) Save a fitted model
     def save_model(self, name: str):
+        """
+        Save a fitted model pipeline to disk as a .joblib file.
+
+        Parameters
+        ----------
+        name:
+            Name of the model that has already been trained.
+        """
         if name not in self.models_:
-            raise ValueError(f"Model {name} khong ton tai.")
+            raise ValueError(f"Model '{name}' does not exist in registry.")
         path = self.output_dir / f"{name}.joblib"
         joblib.dump(self.models_[name], path)
-        self.logger.info(f"Saved model {name} to {path}")
+        self.logger.info(f"Saved model '{name}' to {path}")
 
-    # 10) Nap model da luu
+    # 10) Load a fitted model
     def load_model(self, path: str, name: Optional[str] = None):
+        """
+        Load a model pipeline from a .joblib file and register it.
+
+        Parameters
+        ----------
+        path:
+            Path to the .joblib file.
+        name:
+            Optional custom name for the loaded model. If None, the filename
+            (without extension) will be used.
+
+        Returns
+        -------
+        The loaded model pipeline.
+        """
         model = joblib.load(path)
         if name is None:
             name = Path(path).stem
         self.models_[name] = model
-        self.logger.info(f"Loaded model {name} from {path}")
+        self.logger.info(f"Loaded model '{name}' from {path}")
         return model
 
-    # 11) Luu ket qua so sanh model
+    # 11) Save model comparison results
     def save_results(self):
+        """
+        Save evaluation results to CSV and plot a RMSE comparison bar chart.
+
+        Outputs
+        -------
+        - model_results.csv
+        - rmse_comparison.png
+        inside the configured output directory.
+        """
         if not self.results_:
-            self.logger.warning("Khong co ket qua model nao de luu.")
+            self.logger.warning("No model results to save. Skipping save_results.")
             return
 
         df = pd.DataFrame(self.results_).T
-        df.to_csv(self.output_dir / "model_results.csv")
-        self.logger.info("Saved model_results.csv")
+        csv_path = self.output_dir / "model_results.csv"
+        df.to_csv(csv_path)
+        self.logger.info(f"Saved model comparison results to {csv_path}")
 
         plt.figure(figsize=(8, 5))
         plt.bar(df.index, df["rmse"])
         plt.xticks(rotation=45, ha="right")
         plt.ylabel("RMSE")
-        plt.title("So sanh RMSE cac mo hinh")
+        plt.title("Model RMSE comparison")
         plt.tight_layout()
-        plt.savefig(self.output_dir / "rmse_comparison.png")
+        fig_path = self.output_dir / "rmse_comparison.png"
+        plt.savefig(fig_path)
         plt.close()
+        self.logger.info(f"Saved RMSE comparison plot to {fig_path}")
 
-    # 12) Ham run tong hop
+    # 12) End to end convenience runner
     def run(self, csv_path: str, tune_optuna: bool = True):
+        """
+        Run the full training pipeline end to end.
+
+        Steps
+        -----
+        - Load data
+        - Split train and test
+        - Build preprocessing pipeline
+        - Train default models
+        - Optionally run Optuna tuning for random_forest
+        - Save comparison results
+
+        Parameters
+        ----------
+        csv_path:
+            Path to the training CSV file.
+        tune_optuna:
+            If True, runs Optuna tuning for the random_forest model.
+
+        Returns
+        -------
+        Dict[str, Dict]
+            Evaluation metrics for all trained models.
+        """
+        self.logger.info("Starting full training pipeline.")
         self.load_data(csv_path)
         self.split_data()
         self.build_preprocessing()
         self.train_default_models()
 
         if tune_optuna:
-            # vi du: tune random_forest
+            self.logger.info("Running Optuna tuning for 'random_forest'.")
             self.tune_model_optuna("random_forest", n_trials=20)
+        else:
+            self.logger.info("Skipping Optuna tuning step.")
 
         self.save_results()
+        self.logger.info("Full training pipeline completed.")
         return self.results_
+
 
 __all__ = ["ModelTrainer"]
