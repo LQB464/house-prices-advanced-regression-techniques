@@ -31,7 +31,7 @@ def build_feature_pipeline(
     enable_variance_selector: bool = True,
     variance_threshold: float = 0.0,
     enable_kbest_mi: bool = False,
-    k_best_features: int = 150,
+    k_best_features: int = 200,
     mi_random_state: int = 0,
 ) -> Pipeline:
     """
