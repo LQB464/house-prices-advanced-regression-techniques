@@ -960,7 +960,12 @@ class ModelTrainer:
             raise ValueError("Need at least 3 tuned models for 3 model stacks.")
 
         combo_list = list(itertools.combinations(tuned_model_names, 3))
-        combo = trial.suggest_categorical("stack_combo", combo_list)
+
+        combo_str_list = ["|".join(c) for c in combo_list]
+        combo_str = trial.suggest_categorical("stack_combo", combo_str_list)
+
+        combo = tuple(combo_str.split("|"))
+
 
         meta_alpha = trial.suggest_float("meta_alpha", 1e-4, 1e-1, log=True)
         meta_l1_ratio = trial.suggest_float("meta_l1_ratio", 0.1, 0.9)
@@ -1045,6 +1050,59 @@ class ModelTrainer:
             sampler=sampler,
         )
         study.optimize(objective, n_trials=n_trials)
+        
+        trials_data = []
+        for t in study.trials:
+            # chỉ lấy trial hoàn thành
+            if t.state != optuna.trial.TrialState.COMPLETE:
+                continue
+
+            params = t.params
+            combo = params.get("stack_combo")
+
+            # combo là tuple/list -> stringify cho dễ lưu csv
+            if isinstance(combo, (list, tuple)):
+                combo_str = " + ".join(combo)
+            else:
+                combo_str = str(combo)
+
+            trials_data.append(
+                {
+                    "trial_number": t.number,
+                    "value_cv_rmse": t.value,
+                    "stack_combo": combo_str,
+                    "meta_alpha": params.get("meta_alpha"),
+                    "meta_l1_ratio": params.get("meta_l1_ratio"),
+                    "passthrough": params.get("passthrough"),
+                }
+            )
+            
+        if trials_data:
+            df_trials = pd.DataFrame(trials_data)
+            trials_path = self.output_dir / "stacking_optuna_trials.csv"
+            df_trials.to_csv(trials_path, index=False)
+            self.logger.info(
+                f"Saved stacking Optuna trials to {trials_path}"
+            )
+
+            # Summary theo từng combo: best / mean cv_rmse, số trial
+            summary = (
+                df_trials.groupby("stack_combo")["value_cv_rmse"]
+                .agg(["min", "mean", "count"])
+                .reset_index()
+                .rename(
+                    columns={
+                        "min": "best_cv_rmse",
+                        "mean": "mean_cv_rmse",
+                        "count": "n_trials",
+                    }
+                )
+            )
+            summary_path = self.output_dir / "stacking_optuna_summary.csv"
+            summary.to_csv(summary_path, index=False)
+            self.logger.info(
+                f"Saved stacking summary per combo to {summary_path}"
+            )
 
         best_params = study.best_params
         best_combo = best_params["stack_combo"]
