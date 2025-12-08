@@ -491,15 +491,85 @@ class ModelTrainer:
         # Sampler có seed để deterministic
         sampler = optuna.samplers.TPESampler(seed=self.random_state)
 
+        # -----------------------------------------------------
+        # Default params cho enqueue_trial (baseline hiện tại)
+        # Các giá trị này khớp với get_default_models(...)
+        # -----------------------------------------------------
+        default_params: Dict[str, object] = {}
+
+        if base_name == "random_forest":
+            # default: 600 cây, max_depth=None (dùng 0 như sentinel)
+            default_params = {
+                "n_estimators": 600,
+                "max_depth": 0,           # 0 sẽ được map thành None
+                "min_samples_split": 2,
+                "min_samples_leaf": 1,
+                "max_features": "sqrt",
+            }
+
+        elif base_name == "elasticnet":
+            default_params = {
+                "alpha": 0.01,
+                "l1_ratio": 0.5,
+            }
+
+        elif base_name == "xgb":
+            if not HAS_XGB:
+                raise RuntimeError("xgboost not installed.")
+            default_params = {
+                "learning_rate": 0.03,
+                "n_estimators": 4000,
+                "max_depth": 4,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "min_child_weight": 2.0,
+                "reg_lambda": 3.0,
+                "reg_alpha": 0.2,
+                "gamma": 0.05,
+            }
+
+        elif base_name == "catboost":
+            if not HAS_CAT:
+                raise RuntimeError("catboost not installed.")
+            default_params = {
+                "learning_rate": 0.05,
+                "depth": 6,
+                "n_estimators": 3000,
+                "l2_leaf_reg": 3.0,
+                "subsample": 0.8,
+            }
+
+        elif base_name == "lgbm":
+            if not HAS_LGBM:
+                raise RuntimeError("lightgbm not installed.")
+            default_params = {
+                "max_n_estimators": 3000,
+                "learning_rate": 0.03,
+                "max_depth": 12,
+                "num_leaves": 31,
+                "min_child_samples": 20,
+                "min_child_weight": 1e-3,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "reg_alpha": 0.1,
+                "reg_lambda": 1.0,
+                "min_split_gain": 0.0,
+            }
+
+        # -----------------------------------------------------
+        # Objective với search space mở rộng
+        # -----------------------------------------------------
         def objective(trial: "optuna.Trial") -> float:
             # -----------------------------
             # RANDOM FOREST
             # -----------------------------
             if base_name == "random_forest":
-                n_estimators = trial.suggest_int("n_estimators", 200, 1000, step=200)
-                max_depth = trial.suggest_int("max_depth", 4, 30)
-                min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
-                min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 10)
+                n_estimators = trial.suggest_int("n_estimators", 200, 2000, step=200)
+                # cho phép 0 để map thành None (unbounded)
+                max_depth_raw = trial.suggest_int("max_depth", 0, 40)
+                max_depth = None if max_depth_raw == 0 else max_depth_raw
+                min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
+                min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 20)
                 max_features = trial.suggest_categorical(
                     "max_features",
                     ["sqrt", "log2", None],
@@ -518,8 +588,8 @@ class ModelTrainer:
             # ELASTICNET
             # -----------------------------
             elif base_name == "elasticnet":
-                alpha = trial.suggest_float("alpha", 1e-4, 10.0, log=True)
-                l1_ratio = trial.suggest_float("l1_ratio", 0.05, 0.95)
+                alpha = trial.suggest_float("alpha", 1e-5, 100.0, log=True)
+                l1_ratio = trial.suggest_float("l1_ratio", 0.0, 1.0)
                 est = ElasticNet(
                     alpha=alpha,
                     l1_ratio=l1_ratio,
@@ -535,24 +605,24 @@ class ModelTrainer:
                     raise RuntimeError("xgboost not installed.")
 
                 learning_rate = trial.suggest_float(
-                    "learning_rate", 0.01, 0.2, log=True
+                    "learning_rate", 0.005, 0.3, log=True
                 )
                 n_estimators = trial.suggest_int(
-                    "n_estimators", 500, 2500, step=250
+                    "n_estimators", 1000, 6000, step=500
                 )
-                max_depth = trial.suggest_int("max_depth", 2, 8)
-                subsample = trial.suggest_float("subsample", 0.6, 1.0)
+                max_depth = trial.suggest_int("max_depth", 2, 10)
+                subsample = trial.suggest_float("subsample", 0.5, 1.0)
                 colsample_bytree = trial.suggest_float(
-                    "colsample_bytree", 0.6, 1.0
+                    "colsample_bytree", 0.5, 1.0
                 )
                 min_child_weight = trial.suggest_float(
-                    "min_child_weight", 0.1, 20.0, log=True
+                    "min_child_weight", 1e-2, 50.0, log=True
                 )
                 reg_lambda = trial.suggest_float(
-                    "reg_lambda", 0.1, 20.0, log=True
+                    "reg_lambda", 1e-2, 50.0, log=True
                 )
-                reg_alpha = trial.suggest_float("reg_alpha", 0.0, 1.0)
-                gamma = trial.suggest_float("gamma", 0.0, 0.4)
+                reg_alpha = trial.suggest_float("reg_alpha", 0.0, 5.0)
+                gamma = trial.suggest_float("gamma", 0.0, 0.6)
 
                 est = xgb.XGBRegressor(
                     n_estimators=n_estimators,
@@ -580,16 +650,16 @@ class ModelTrainer:
                     raise RuntimeError("catboost not installed.")
 
                 learning_rate = trial.suggest_float(
-                    "learning_rate", 0.01, 0.2, log=True
+                    "learning_rate", 0.01, 0.3, log=True
                 )
-                depth = trial.suggest_int("depth", 4, 10)
+                depth = trial.suggest_int("depth", 3, 10)
                 n_estimators = trial.suggest_int(
-                    "n_estimators", 500, 2500, step=250
+                    "n_estimators", 1000, 5000, step=500
                 )
                 l2_leaf_reg = trial.suggest_float(
-                    "l2_leaf_reg", 1.0, 15.0, log=True
+                    "l2_leaf_reg", 0.5, 50.0, log=True
                 )
-                subsample = trial.suggest_float("subsample", 0.6, 1.0)
+                subsample = trial.suggest_float("subsample", 0.5, 1.0)
 
                 est = CatBoostRegressor(
                     loss_function="RMSE",
@@ -610,29 +680,29 @@ class ModelTrainer:
                     raise RuntimeError("lightgbm not installed.")
 
                 max_n_estimators = trial.suggest_int(
-                    "max_n_estimators", 500, 2500, step=250
+                    "max_n_estimators", 1000, 6000, step=500
                 )
                 learning_rate = trial.suggest_float(
-                    "learning_rate", 0.01, 0.2, log=True
+                    "learning_rate", 0.005, 0.3, log=True
                 )
-                max_depth = trial.suggest_int("max_depth", 3, 16)
-                num_leaves = trial.suggest_int("num_leaves", 16, 256)
+                max_depth = trial.suggest_int("max_depth", 3, 20)
+                num_leaves = trial.suggest_int("num_leaves", 16, 512)
                 min_child_samples = trial.suggest_int(
-                    "min_child_samples", 10, 80
+                    "min_child_samples", 5, 120
                 )
                 min_child_weight = trial.suggest_float(
-                    "min_child_weight", 1e-3, 10.0, log=True
+                    "min_child_weight", 1e-4, 50.0, log=True
                 )
-                subsample = trial.suggest_float("subsample", 0.6, 1.0)
+                subsample = trial.suggest_float("subsample", 0.5, 1.0)
                 colsample_bytree = trial.suggest_float(
-                    "colsample_bytree", 0.6, 1.0
+                    "colsample_bytree", 0.5, 1.0
                 )
-                reg_alpha = trial.suggest_float("reg_alpha", 0.0, 1.0)
+                reg_alpha = trial.suggest_float("reg_alpha", 0.0, 5.0)
                 reg_lambda = trial.suggest_float(
-                    "reg_lambda", 0.1, 20.0, log=True
+                    "reg_lambda", 1e-2, 50.0, log=True
                 )
                 min_split_gain = trial.suggest_float(
-                    "min_split_gain", 0.0, 0.3
+                    "min_split_gain", 0.0, 0.5
                 )
 
                 # đảm bảo num_leaves không vượt 2^max_depth - 1
@@ -687,10 +757,20 @@ class ModelTrainer:
 
             return cv_rmse_mean
 
+        # -----------------------------------------------------
+        # Tạo study + enqueue trial với default params
+        # -----------------------------------------------------
         study = optuna.create_study(
             direction="minimize",
             sampler=sampler,
         )
+
+        if default_params:
+            self.logger.info(
+                f"[Optuna] Enqueue default params for '{base_name}': {default_params}"
+            )
+            study.enqueue_trial(default_params)
+
         study.optimize(objective, n_trials=n_trials)
 
         self.logger.info(
@@ -699,11 +779,16 @@ class ModelTrainer:
 
         bp = study.best_params
 
+        # -----------------------------------------------------
         # Rebuild best estimator với best_params
+        # (giữ nguyên logic như trước, chỉ dùng bp)
+        # -----------------------------------------------------
         if base_name == "random_forest":
+            max_depth = bp.get("max_depth", 0)
+            max_depth = None if max_depth == 0 else max_depth
             best_est = RandomForestRegressor(
                 n_estimators=bp.get("n_estimators", 600),
-                max_depth=bp.get("max_depth", None),
+                max_depth=max_depth,
                 min_samples_split=bp.get("min_samples_split", 2),
                 min_samples_leaf=bp.get("min_samples_leaf", 1),
                 max_features=bp.get("max_features", "sqrt"),
@@ -960,12 +1045,7 @@ class ModelTrainer:
             raise ValueError("Need at least 3 tuned models for 3 model stacks.")
 
         combo_list = list(itertools.combinations(tuned_model_names, 3))
-
-        combo_str_list = ["|".join(c) for c in combo_list]
-        combo_str = trial.suggest_categorical("stack_combo", combo_str_list)
-
-        combo = tuple(combo_str.split("|"))
-
+        combo = trial.suggest_categorical("stack_combo", combo_list)
 
         meta_alpha = trial.suggest_float("meta_alpha", 1e-4, 1e-1, log=True)
         meta_l1_ratio = trial.suggest_float("meta_l1_ratio", 0.1, 0.9)
