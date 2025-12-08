@@ -8,6 +8,8 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.exceptions import NotFittedError
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
+from functools import partial
+
 
 class OrdinalMapper(BaseEstimator, TransformerMixin):
     """
@@ -373,6 +375,7 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
         self.k = int(k)
         self.random_state = int(random_state)
         self.selector_: Optional[SelectKBest] = None
+        self.feature_names_in_ = None
 
     def fit(self, X, y):
         if y is None:
@@ -381,15 +384,19 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
         X_arr = np.asarray(X)
         y_arr = np.asarray(y)
 
-        # --- CHỈNH ĐÚNG k ---
+        # chỉnh đúng k
         n_features = X_arr.shape[1]
         k = min(self.k, n_features)
 
-        def _mi(X_, y_):
-            return mutual_info_regression(X_, y_, random_state=self.random_state)
+        # dùng partial của mutual_info_regression thay vì local function
+        score_func = partial(
+            mutual_info_regression,
+            random_state=self.random_state,
+        )
 
-        self.selector_ = SelectKBest(score_func=_mi, k=k)
+        self.selector_ = SelectKBest(score_func=score_func, k=k)
 
+        # lưu tên cột nếu có
         self.feature_names_in_ = getattr(X, "columns", None)
 
         self.selector_.fit(X_arr, y_arr)
@@ -413,7 +420,6 @@ class KBestMutualInfoSelector(BaseEstimator, TransformerMixin):
         input_features = np.asarray(input_features, dtype=object)
         mask = self.selector_.get_support()
         return input_features[mask]
-
 
 
 __all__ = [
