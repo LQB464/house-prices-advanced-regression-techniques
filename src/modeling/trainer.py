@@ -22,6 +22,7 @@ from sklearn.metrics import make_scorer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor, StackingRegressor
 from sklearn.linear_model import ElasticNet, Ridge, Lasso
+from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 
 try:
@@ -488,20 +489,27 @@ class ModelTrainer:
             f"with n_trials={n_trials}, cv_splits={cv_splits}"
         )
 
-        # Sampler có seed để deterministic
-        sampler = optuna.samplers.TPESampler(seed=self.random_state)
+        # Sampler và pruner cho Optuna
+        sampler = optuna.samplers.TPESampler(
+            seed=self.random_state,
+            n_startup_trials=10,
+            multivariate=True,
+            group=True,
+        )
+        pruner = optuna.pruners.MedianPruner(
+            n_startup_trials=10,
+            n_warmup_steps=0,
+        )
 
         # -----------------------------------------------------
         # Default params cho enqueue_trial (baseline hiện tại)
-        # Các giá trị này khớp với get_default_models(...)
         # -----------------------------------------------------
         default_params: Dict[str, object] = {}
 
         if base_name == "random_forest":
-            # default: 600 cây, max_depth=None (dùng 0 như sentinel)
             default_params = {
                 "n_estimators": 600,
-                "max_depth": 0,           # 0 sẽ được map thành None
+                "max_depth": 0,  # 0 sẽ được map thành None
                 "min_samples_split": 2,
                 "min_samples_leaf": 1,
                 "max_features": "sqrt",
@@ -557,23 +565,31 @@ class ModelTrainer:
             }
 
         # -----------------------------------------------------
-        # Objective với search space mở rộng
+        # Objective với search space đã chỉnh
         # -----------------------------------------------------
         def objective(trial: "optuna.Trial") -> float:
-            # -----------------------------
             # RANDOM FOREST
-            # -----------------------------
             if base_name == "random_forest":
-                n_estimators = trial.suggest_int("n_estimators", 200, 2000, step=200)
-                # cho phép 0 để map thành None (unbounded)
-                max_depth_raw = trial.suggest_int("max_depth", 0, 40)
+                base = default_params
+
+                n_estimators = trial.suggest_int(
+                    "n_estimators",
+                    int(base["n_estimators"] * 0.5),   # 300
+                    int(base["n_estimators"] * 3.0),   # 1800
+                    step=100,
+                )
+
+                max_depth_raw = trial.suggest_int("max_depth", 0, 20)
                 max_depth = None if max_depth_raw == 0 else max_depth_raw
-                min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
-                min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 20)
+
+                min_samples_split = trial.suggest_int("min_samples_split", 2, 10)
+                min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 8)
+
                 max_features = trial.suggest_categorical(
                     "max_features",
-                    ["sqrt", "log2", None],
+                    ["sqrt", "log2", 0.6, 0.8],
                 )
+
                 est = RandomForestRegressor(
                     n_estimators=n_estimators,
                     max_depth=max_depth,
@@ -584,12 +600,10 @@ class ModelTrainer:
                     random_state=self.random_state,
                 )
 
-            # -----------------------------
             # ELASTICNET
-            # -----------------------------
             elif base_name == "elasticnet":
-                alpha = trial.suggest_float("alpha", 1e-5, 100.0, log=True)
-                l1_ratio = trial.suggest_float("l1_ratio", 0.0, 1.0)
+                alpha = trial.suggest_float("alpha", 1e-3, 10.0, log=True)
+                l1_ratio = trial.suggest_float("l1_ratio", 0.2, 0.8)
                 est = ElasticNet(
                     alpha=alpha,
                     l1_ratio=l1_ratio,
@@ -597,32 +611,38 @@ class ModelTrainer:
                     random_state=self.random_state,
                 )
 
-            # -----------------------------
             # XGBOOST
-            # -----------------------------
             elif base_name == "xgb":
                 if not HAS_XGB:
                     raise RuntimeError("xgboost not installed.")
 
+                base = default_params
+
                 learning_rate = trial.suggest_float(
-                    "learning_rate", 0.005, 0.3, log=True
+                    "learning_rate",
+                    0.005,
+                    0.1,
+                    log=True,
                 )
                 n_estimators = trial.suggest_int(
-                    "n_estimators", 1000, 6000, step=500
+                    "n_estimators",
+                    int(base["n_estimators"] * 0.5),   # 2000
+                    int(base["n_estimators"] * 1.5),   # 6000
+                    step=500,
                 )
-                max_depth = trial.suggest_int("max_depth", 2, 10)
-                subsample = trial.suggest_float("subsample", 0.5, 1.0)
-                colsample_bytree = trial.suggest_float(
-                    "colsample_bytree", 0.5, 1.0
-                )
+                max_depth = trial.suggest_int("max_depth", 3, 8)
+                subsample = trial.suggest_float("subsample", 0.6, 1.0)
+                colsample_bytree = trial.suggest_float("colsample_bytree", 0.6, 1.0)
+
                 min_child_weight = trial.suggest_float(
-                    "min_child_weight", 1e-2, 50.0, log=True
+                    "min_child_weight",
+                    0.1,
+                    20.0,
+                    log=True,
                 )
-                reg_lambda = trial.suggest_float(
-                    "reg_lambda", 1e-2, 50.0, log=True
-                )
+                reg_lambda = trial.suggest_float("reg_lambda", 0.1, 20.0, log=True)
                 reg_alpha = trial.suggest_float("reg_alpha", 0.0, 5.0)
-                gamma = trial.suggest_float("gamma", 0.0, 0.6)
+                gamma = trial.suggest_float("gamma", 0.0, 0.5)
 
                 est = xgb.XGBRegressor(
                     n_estimators=n_estimators,
@@ -642,9 +662,7 @@ class ModelTrainer:
                     missing=np.nan,
                 )
 
-            # -----------------------------
             # CATBOOST
-            # -----------------------------
             elif base_name == "catboost":
                 if not HAS_CAT:
                     raise RuntimeError("catboost not installed.")
@@ -672,9 +690,7 @@ class ModelTrainer:
                     verbose=False,
                 )
 
-            # -----------------------------
-            # LIGHTGBM (wrapper)
-            # -----------------------------
+            # LIGHTGBM
             elif base_name == "lgbm":
                 if not HAS_LGBM:
                     raise RuntimeError("lightgbm not installed.")
@@ -705,7 +721,6 @@ class ModelTrainer:
                     "min_split_gain", 0.0, 0.5
                 )
 
-                # đảm bảo num_leaves không vượt 2^max_depth - 1
                 if max_depth is not None and max_depth > 0:
                     num_leaves = min(num_leaves, 2 ** max_depth - 1)
 
@@ -749,12 +764,10 @@ class ModelTrainer:
             )
             cv_rmse_mean = -scores["test_neg_rmse"].mean()
 
-            # Log chi tiết mỗi trial
             self.logger.info(
                 f"[Optuna {base_name} trial {trial.number}] "
                 f"cv_rmse={cv_rmse_mean:.4f} params={trial.params}"
             )
-
             return cv_rmse_mean
 
         # -----------------------------------------------------
@@ -763,6 +776,7 @@ class ModelTrainer:
         study = optuna.create_study(
             direction="minimize",
             sampler=sampler,
+            pruner=pruner,
         )
 
         if default_params:
@@ -776,12 +790,10 @@ class ModelTrainer:
         self.logger.info(
             f"[Optuna] Best params for '{base_name}': {study.best_params}"
         )
-
         bp = study.best_params
 
         # -----------------------------------------------------
         # Rebuild best estimator với best_params
-        # (giữ nguyên logic như trước, chỉ dùng bp)
         # -----------------------------------------------------
         if base_name == "random_forest":
             max_depth = bp.get("max_depth", 0)
@@ -861,10 +873,36 @@ class ModelTrainer:
         else:
             raise ValueError(f"Unknown base_name '{base_name}' after study.")
 
+        # -----------------------------------------------------
+        # Train model tuned trên full train + so sánh với baseline
+        # -----------------------------------------------------
         tuned_name = f"{base_name}_tuned"
         metrics = self.train_single_model(tuned_name, best_est, cv_splits=cv_splits)
+        test_rmse = metrics["test_rmse"]
+        test_r2 = metrics["test_r2"]
 
-        # Save best tuned model ra file .joblib
+        base_metrics = self.results_.get(base_name)
+        if base_metrics is not None:
+            base_test_rmse = base_metrics["test_rmse"]
+            # nếu tuned tệ hơn test > 1% thì giữ baseline
+            if test_rmse > base_test_rmse * 1.01:
+                self.logger.info(
+                    f"[Optuna] Tuned '{base_name}' worse on test "
+                    f"({test_rmse:.1f} > {base_test_rmse:.1f}), "
+                    "keeping baseline model for stacking."
+                )
+                # map '{base_name}_tuned' về đúng baseline để stacking vẫn dùng được
+                self.results_[tuned_name] = base_metrics.copy()
+                self.models_[tuned_name] = self.models_[base_name]
+                try:
+                    self.save_model(tuned_name)
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to save baseline model under '{tuned_name}': {e}"
+                    )
+                return bp, base_test_rmse, base_metrics["test_r2"]
+
+        # nếu tuned không tệ hơn baseline: lưu model tuned
         try:
             self.save_model(tuned_name)
         except Exception as e:
@@ -872,7 +910,7 @@ class ModelTrainer:
                 f"Failed to save tuned model '{tuned_name}': {e}"
             )
 
-        return bp, metrics["test_rmse"], metrics["test_r2"]
+        return bp, test_rmse, test_r2
 
     def tune_model_gridsearch(
         self,
@@ -1047,8 +1085,8 @@ class ModelTrainer:
         combo_list = list(itertools.combinations(tuned_model_names, 3))
         combo = trial.suggest_categorical("stack_combo", combo_list)
 
-        meta_alpha = trial.suggest_float("meta_alpha", 1e-4, 1e-1, log=True)
-        meta_l1_ratio = trial.suggest_float("meta_l1_ratio", 0.1, 0.9)
+        meta_alpha = trial.suggest_float("meta_alpha", 1e-5, 1e-1, log=True)
+        meta_l1_ratio = trial.suggest_float("meta_l1_ratio", 0.0, 1.0)
         passthrough = trial.suggest_categorical("passthrough", [False, True])
 
         base_estimators = []
@@ -1068,7 +1106,10 @@ class ModelTrainer:
 
         stack_reg = StackingRegressor(
             estimators=base_estimators,
-            final_estimator=meta,
+            final_estimator=Pipeline([
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("enet", meta),
+            ]),
             n_jobs=-1,
             passthrough=passthrough,
         )
