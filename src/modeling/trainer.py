@@ -719,6 +719,14 @@ class ModelTrainer:
 
         tuned_name = f"{base_name}_tuned"
         metrics = self.train_single_model(tuned_name, best_est, cv_splits=5)
+        
+        # Save best tuned model ra file .joblib
+        try:
+            self.save_model(tuned_name)
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to save tuned model '{tuned_name}': {e}"
+            )
         return bp, metrics["test_rmse"], metrics["test_r2"]
 
     def tune_model_gridsearch(
@@ -790,6 +798,13 @@ class ModelTrainer:
             "test_rmse": test_rmse,
             "test_r2": test_r2,
         }
+        
+        try:
+            self.save_model(name)
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to save grid search model '{name}': {e}"
+            )
         return search.best_params_, test_rmse, test_r2
 
     def tune_top_models(
@@ -959,6 +974,12 @@ class ModelTrainer:
             return_train_score=False,
         )
         cv_rmse_mean = -scores["test_neg_rmse"].mean()
+        
+        self.logger.info(
+            f"[STACK TRIAL {trial.number}] combo={combo} "
+            f"meta_alpha={meta_alpha:.6f} meta_l1_ratio={meta_l1_ratio:.3f} "
+            f"passthrough={passthrough} cv_rmse={cv_rmse_mean:.4f}"
+        )
         return cv_rmse_mean
 
     def tune_stacking_with_optuna(
@@ -1054,6 +1075,13 @@ class ModelTrainer:
         }
 
         self.results_[model_name] = metrics
+        
+        try:
+            self.save_model(model_name)
+        except Exception as e:
+            self.logger.warning(
+                f"Failed to save stacking model '{model_name}': {e}"
+            )
         self.logger.info(
             f"[STACK {best_combo}] Test RMSE={test_rmse:.4f} Test R2={test_r2:.4f}"
         )
