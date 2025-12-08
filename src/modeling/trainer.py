@@ -412,6 +412,7 @@ class ModelTrainer:
         self,
         base_name: str,
         n_trials: int = 30,
+        cv_splits: int = 5,
     ) -> Tuple[Dict, float, float]:
         """
         Tune hyperparameters của một base model bằng Optuna.
@@ -439,8 +440,11 @@ class ModelTrainer:
 
         self.logger.info(
             f"[Optuna] Start tuning for base model '{base_name}' "
-            f"with n_trials={n_trials}"
+            f"with n_trials={n_trials}, cv_splits={cv_splits}"
         )
+
+        # Sampler có seed để deterministic
+        sampler = optuna.samplers.TPESampler(seed=self.random_state)
 
         def objective(trial: "optuna.Trial") -> float:
             # -----------------------------
@@ -624,14 +628,24 @@ class ModelTrainer:
                 X_train,
                 y_train,
                 scoring=_get_scorers(),
-                cv=5,
+                cv=cv_splits,
                 n_jobs=-1,
                 return_train_score=False,
             )
             cv_rmse_mean = -scores["test_neg_rmse"].mean()
+
+            # Log chi tiết mỗi trial
+            self.logger.info(
+                f"[Optuna {base_name} trial {trial.number}] "
+                f"cv_rmse={cv_rmse_mean:.4f} params={trial.params}"
+            )
+
             return cv_rmse_mean
 
-        study = optuna.create_study(direction="minimize")
+        study = optuna.create_study(
+            direction="minimize",
+            sampler=sampler,
+        )
         study.optimize(objective, n_trials=n_trials)
 
         self.logger.info(
@@ -718,8 +732,8 @@ class ModelTrainer:
             raise ValueError(f"Unknown base_name '{base_name}' after study.")
 
         tuned_name = f"{base_name}_tuned"
-        metrics = self.train_single_model(tuned_name, best_est, cv_splits=5)
-        
+        metrics = self.train_single_model(tuned_name, best_est, cv_splits=cv_splits)
+
         # Save best tuned model ra file .joblib
         try:
             self.save_model(tuned_name)
@@ -727,24 +741,18 @@ class ModelTrainer:
             self.logger.warning(
                 f"Failed to save tuned model '{tuned_name}': {e}"
             )
+
         return bp, metrics["test_rmse"], metrics["test_r2"]
 
     def tune_model_gridsearch(
         self,
         base_name: str,
         param_grid: Dict,
+        cv_splits: int = 5,
     ) -> Tuple[Dict, float, float]:
         """
         Classic GridSearchCV tuning for simple base models
         that are not handled by tune_model_optuna.
-
-        Parameters
-        ----------
-        base_name:
-            One of the keys from get_default_models.
-        param_grid:
-            Parameter grid without 'model__' prefix. The method will add
-            'model__' automatically.
         """
         if self.feature_pipe_ is None:
             raise RuntimeError("Call build_preprocessing before GridSearchCV.")
@@ -766,13 +774,13 @@ class ModelTrainer:
 
         self.logger.info(
             f"Start GridSearchCV for base model '{base_name}' "
-            f"with grid keys {list(param_grid.keys())}"
+            f"with grid keys {list(param_grid.keys())}, cv_splits={cv_splits}"
         )
         search = GridSearchCV(
             pipe,
             param_grid=grid,
             scoring="neg_root_mean_squared_error",
-            cv=5,
+            cv=cv_splits,
             n_jobs=-1,
         )
         search.fit(self.X_train_, self.y_train_)
@@ -798,42 +806,32 @@ class ModelTrainer:
             "test_rmse": test_rmse,
             "test_r2": test_r2,
         }
-        
+
         try:
             self.save_model(name)
         except Exception as e:
             self.logger.warning(
                 f"Failed to save grid search model '{name}': {e}"
             )
+
         return search.best_params_, test_rmse, test_r2
 
     def tune_top_models(
         self,
         top_model_names: List[str],
         n_trials: int = 30,
+        cv_splits: int = 5,
     ) -> List[str]:
         """
         Hyperparameter tuning cho danh sách top models.
-
-        - Các model mạnh (tree/boosting/elasticnet) dùng Optuna:
-            "random_forest", "elasticnet", "xgb", "catboost", "lgbm"
-
-        - Các model tuyến tính/nhẹ dùng GridSearchCV:
-            "ridge", "lasso", "svr"
-
-        Trả về:
-            Danh sách tên model đã được tune, đã có trong self.models_ và self.results_.
         """
         tuned_names: List[str] = []
 
-        # Grid cho các model dùng GridSearchCV
         grids: Dict[str, Dict] = {
             "ridge": {
-                # regularization từ rất nhẹ đến khá mạnh
                 "alpha": [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3],
             },
             "lasso": {
-                # L1 thường cần alpha nhỏ hơn
                 "alpha": [1e-5, 1e-4, 1e-3, 1e-2, 1e-1],
             },
             "svr": {
@@ -856,14 +854,11 @@ class ModelTrainer:
             self.logger.info(f"Hyperparameter tuning for model '{name}'")
 
             try:
-                # --------------------------------
-                # Nhóm dùng Optuna
-                # --------------------------------
                 if name in optuna_supported:
-                    # có thể tinh chỉnh n_trials riêng từng model nếu muốn
                     best_params, rmse, r2 = self.tune_model_optuna(
                         base_name=name,
                         n_trials=n_trials,
+                        cv_splits=cv_splits,
                     )
                     tuned_name = f"{name}_tuned"
                     self.logger.info(
@@ -872,13 +867,11 @@ class ModelTrainer:
                     )
                     tuned_names.append(tuned_name)
 
-                # --------------------------------
-                # Nhóm dùng GridSearchCV
-                # --------------------------------
                 elif name in grid_supported:
                     best_params, rmse, r2 = self.tune_model_gridsearch(
                         base_name=name,
                         param_grid=grids[name],
+                        cv_splits=cv_splits,
                     )
                     tuned_name = f"{name}_grid"
                     self.logger.info(
@@ -888,7 +881,6 @@ class ModelTrainer:
                     tuned_names.append(tuned_name)
 
                 else:
-                    # không có chiến lược tuning cho model này
                     self.logger.warning(
                         f"No tuning strategy defined for base model '{name}'. Skipping."
                     )
@@ -909,14 +901,10 @@ class ModelTrainer:
         self,
         trial: "optuna.Trial",
         tuned_model_names: List[str],
+        cv_splits: int,
     ) -> float:
         """
         Optuna objective for stacking.
-
-        The search space includes:
-        - Choice of 3 model combination from tuned_model_names
-        - Hyperparameters for meta learner (ElasticNet)
-        - Whether to passthrough original features to meta layer
         """
         if self.feature_pipe_ is None:
             raise RuntimeError("Feature pipeline not built.")
@@ -926,11 +914,9 @@ class ModelTrainer:
         if len(tuned_model_names) < 3:
             raise ValueError("Need at least 3 tuned models for 3 model stacks.")
 
-        # All 3 model combinations from candidate list
         combo_list = list(itertools.combinations(tuned_model_names, 3))
         combo = trial.suggest_categorical("stack_combo", combo_list)
 
-        # Meta learner hyperparameters
         meta_alpha = trial.suggest_float("meta_alpha", 1e-4, 1e-1, log=True)
         meta_l1_ratio = trial.suggest_float("meta_l1_ratio", 0.1, 0.9)
         passthrough = trial.suggest_categorical("passthrough", [False, True])
@@ -969,40 +955,28 @@ class ModelTrainer:
             self.X_train_,
             self.y_train_,
             scoring=_get_scorers(),
-            cv=5,
+            cv=cv_splits,
             n_jobs=-1,
             return_train_score=False,
         )
         cv_rmse_mean = -scores["test_neg_rmse"].mean()
-        
+
         self.logger.info(
             f"[STACK TRIAL {trial.number}] combo={combo} "
             f"meta_alpha={meta_alpha:.6f} meta_l1_ratio={meta_l1_ratio:.3f} "
             f"passthrough={passthrough} cv_rmse={cv_rmse_mean:.4f}"
         )
+
         return cv_rmse_mean
 
     def tune_stacking_with_optuna(
         self,
         tuned_model_names: List[str],
         n_trials: int = 40,
+        cv_splits: int = 5,
     ) -> Tuple[str, Dict, Dict[str, float]]:
         """
         Tune a 3 model stacking ensemble with Optuna.
-
-        The search chooses:
-        - Which 3 tuned models to include
-        - Hyperparameters of ElasticNet meta learner
-        - Whether to passthrough original features
-
-        Returns
-        -------
-        model_name:
-            Name under which the stacking model is registered.
-        best_params:
-            The best Optuna parameters.
-        metrics:
-            Test metrics of the final fitted stacking model.
         """
         if not HAS_OPTUNA:
             raise RuntimeError("Optuna is not installed.")
@@ -1014,10 +988,17 @@ class ModelTrainer:
         if len(tuned_model_names) < 3:
             raise ValueError("Need at least 3 tuned models for stacking.")
 
-        def objective(trial: "optuna.Trial") -> float:
-            return self._optuna_stack_objective(trial, tuned_model_names)
+        sampler = optuna.samplers.TPESampler(seed=self.random_state)
 
-        study = optuna.create_study(direction="minimize")
+        def objective(trial: "optuna.Trial") -> float:
+            return self._optuna_stack_objective(
+                trial, tuned_model_names, cv_splits=cv_splits
+            )
+
+        study = optuna.create_study(
+            direction="minimize",
+            sampler=sampler,
+        )
         study.optimize(objective, n_trials=n_trials)
 
         best_params = study.best_params
@@ -1075,13 +1056,14 @@ class ModelTrainer:
         }
 
         self.results_[model_name] = metrics
-        
+
         try:
             self.save_model(model_name)
         except Exception as e:
             self.logger.warning(
                 f"Failed to save stacking model '{model_name}': {e}"
             )
+
         self.logger.info(
             f"[STACK {best_combo}] Test RMSE={test_rmse:.4f} Test R2={test_r2:.4f}"
         )
@@ -1176,6 +1158,7 @@ class ModelTrainer:
         tuned_names = self.tune_top_models(
             top_model_names=top_names,
             n_trials=n_trials_model,
+            cv_splits=cv_splits,
         )
 
         if len(tuned_names) < 3:
