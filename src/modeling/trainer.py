@@ -237,14 +237,39 @@ class ModelTrainer:
     def split_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """
         Split loaded dataframe into train and test subsets.
-
-        Returns X_train, X_test, y_train, y_test.
+        For regression tasks: perform stratified split by binning the target.
+        
+        Returns
+        -------
+        X_train, X_test, y_train, y_test
         """
         if self.df_ is None:
             raise RuntimeError("No data loaded. Call load_data first.")
 
+        # Split features and target
         X, y = self.dp.split_features_target(self.df_)
 
+        # ----------------------------
+        # 1) Stratified binning for regression
+        # ----------------------------
+        n_bins = 15 
+        try:
+            # create quantile-based bins
+            y_binned = pd.qcut(y, q=n_bins, duplicates="drop", labels=False)
+            stratify_label = y_binned
+            self.logger.info(
+                f"Using stratified split with {n_bins} quantile bins for continuous target."
+            )
+        except Exception as e:
+            # Fall back to non-stratified split if binning fails
+            self.logger.warning(
+                f"Stratified binning failed ({e}). Falling back to random split."
+            )
+            stratify_label = None
+
+        # ----------------------------
+        # 2) Actual split
+        # ----------------------------
         (
             self.X_train_,
             self.X_test_,
@@ -255,13 +280,33 @@ class ModelTrainer:
             y,
             test_size=self.test_size,
             random_state=self.random_state,
+            stratify=stratify_label,
         )
 
+        # ----------------------------
+        # 3) Logging distributions
+        # ----------------------------
+        if stratify_label is not None:
+            train_bins = pd.qcut(self.y_train_, q=n_bins, duplicates="drop", labels=False)
+            test_bins = pd.qcut(self.y_test_, q=n_bins, duplicates="drop", labels=False)
+
+            self.logger.info(
+                "Distribution of target bins after stratified split:\n"
+                f"  Train bin counts: {train_bins.value_counts().sort_index().to_dict()}\n"
+                f"  Test bin counts:  {test_bins.value_counts().sort_index().to_dict()}"
+            )
+        else:
+            self.logger.info("Performed random split without stratification.")
+
+        # ----------------------------
+        # 4) Final log
+        # ----------------------------
         self.logger.info(
             "Split data into train and test: "
             f"train={self.X_train_.shape[0]} rows, "
             f"test={self.X_test_.shape[0]} rows"
         )
+
         return self.X_train_, self.X_test_, self.y_train_, self.y_test_
 
     def build_preprocessing(self) -> Pipeline:
