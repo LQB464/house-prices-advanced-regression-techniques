@@ -1,0 +1,11 @@
+stack_combo,best_cv_rmse,mean_cv_rmse,n_trials
+catboost_tuned + random_forest_tuned + elasticnet_tuned,25683.103225625706,25697.613661230607,2
+catboost_tuned + random_forest_tuned + ridge_grid,25716.33787818824,26572.319881383333,3
+catboost_tuned + ridge_grid + elasticnet_tuned,25621.324553475144,25867.045012329138,2
+catboost_tuned + xgb_tuned + elasticnet_tuned,25473.777170481055,25477.959469080906,15
+catboost_tuned + xgb_tuned + random_forest_tuned,32080.88719427521,32644.82549717316,2
+catboost_tuned + xgb_tuned + ridge_grid,25510.301295327,25511.47431219986,5
+random_forest_tuned + ridge_grid + elasticnet_tuned,26465.32958020679,26469.20605302014,2
+xgb_tuned + random_forest_tuned + elasticnet_tuned,25891.562826963785,25942.99086752269,2
+xgb_tuned + random_forest_tuned + ridge_grid,25947.705899347467,27932.702993539897,4
+xgb_tuned + ridge_grid + elasticnet_tuned,28720.17117574618,29059.89408930778,3
