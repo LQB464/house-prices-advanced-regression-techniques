@@ -6,7 +6,7 @@ import logging
 
 import pandas as pd
 
-from preprocessing import Preprocessor
+from ..preprocessing import Preprocessor
 
 
 class TrainerConfig:
