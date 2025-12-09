@@ -6,7 +6,7 @@ import logging
 
 import pandas as pd
 
-from preprocessing import Preprocessor
+from .preprocessing import Preprocessor
 
 
 class TrainerConfig:
@@ -53,7 +53,7 @@ class TrainerConfig:
         self.results_ = {}
 
         # Data preprocessor helper
-        self.dp = Preprocessor(target_col=self.target_col, logger=self.logger)
+        self.dp = Preprocessor(target_col=self.target_col)
 
     def _build_logger(self, log_level: int = logging.INFO) -> logging.Logger:
         """
