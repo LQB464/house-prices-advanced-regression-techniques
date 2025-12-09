@@ -1,5 +1,6 @@
 # src/modeling/preprocessing_mixin.py
-from preprocessing import ORDINAL_MAP_CANONICAL
+from preprocessing import build_feature_pipeline, ORDINAL_MAP_CANONICAL
+from sklearn.pipeline import Pipeline
 
 
 class PreprocessingMixin:
@@ -10,15 +11,16 @@ class PreprocessingMixin:
         self.dp, self.logger, self.X_train_, self.feature_pipe_
     """
 
-    def build_preprocessing(self) -> None:
+    def build_preprocessing(self) -> Pipeline:
         """
-        Gọi Preprocessor.build_feature_pipeline để tạo pipeline feature chung.
+        Build feature preprocessing pipeline using training data.
+        Logic được copy lại đúng từ ModelTrainer.build_preprocessing cũ.
         """
-        if self.X_train_ is None:
-            raise RuntimeError("No train data. Call split_data first.")
+        if self.X_train_ is None or self.X_test_ is None:
+            raise RuntimeError("Call split_data before build_preprocessing.")
 
-        self.logger.info("Building feature pipeline for training data.")
-        self.feature_pipe_ = self.dp.build_feature_pipeline(
+        # Gọi đúng hàm build_feature_pipeline như trong trainer.py cũ
+        self.feature_pipe_ = build_feature_pipeline(
             df_train=self.X_train_,
             ordinal_mapping=ORDINAL_MAP_CANONICAL,
             use_domain_features=True,
@@ -29,4 +31,7 @@ class PreprocessingMixin:
             k_best_features=200,
             mi_random_state=0,
         )
+
         self.logger.info("Feature preprocessing pipeline built successfully.")
+        return self.feature_pipe_
+
