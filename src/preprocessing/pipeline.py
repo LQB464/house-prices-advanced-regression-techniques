@@ -1,4 +1,41 @@
-# preprocessing/pipeline.py
+"""
+preprocessing/pipeline.py
+
+Factory for constructing the full sklearn preprocessing pipeline.
+
+Extended Description
+--------------------
+This module builds a complete sklearn Pipeline for tabular data using a series
+of modular transformers. These include domain feature generation, ordinal encoding,
+rare-category grouping, outlier clipping, column-wise transformations, finite
+value cleaning, NaN-column removal, variance filtering, and mutual information
+feature selection. The pipeline is highly configurable through build_feature_pipeline().
+
+Main Components
+---------------
+- build_feature_pipeline: Assemble a full sklearn Pipeline with optional:
+  - Domain features
+  - Ordinal mapping
+  - Target encoding
+  - Outlier clipping
+  - ColumnTransformer ( numeric/categorical/ordinal pipelines )
+  - Finite cleaning + NaN column dropping
+  - Variance-based selection
+  - Mutual-information feature selection
+
+Usage Example
+-------------
+>>> from preprocessing.pipeline import build_feature_pipeline
+>>> pipe = build_feature_pipeline(df_train, ordinal_mapping=..., use_domain_features=True)
+>>> X_train = pipe.fit_transform(df_train, y_train)
+
+Notes
+-----
+The pipeline integrates custom transformers from transformers.py and automatically
+adapts to the structure of df_train. Ordering of steps is designed to minimize
+data leakage and ensure consistent column alignment.
+"""
+
 from __future__ import annotations
 
 from typing import Any, List, Mapping, Optional, Tuple
@@ -34,6 +71,55 @@ def build_feature_pipeline(
     k_best_features: int = 200,
     mi_random_state: int = 0,
 ) -> Pipeline:
+    """
+    Construct the complete sklearn preprocessing pipeline for tabular data.
+
+    This function builds a sequential sklearn Pipeline consisting of:
+    1. Optional domain feature generation
+    2. Optional ordinal mapping
+    3. Missingness indicator creation
+    4. Rare-category grouping
+    5. Optional target encoding
+    6. Outlier clipping
+    7. ColumnTransformer (numeric/ordinal/categorical)
+    8. Cleaning inf values
+    9. Dropping all-NaN columns
+    10. Optional variance-based selection
+    11. Optional MI-based K-best selection
+
+    Parameters
+    ----------
+    df_train : DataFrame
+        Training dataset used to infer column groupings.
+    ordinal_mapping : dict, optional
+        Mapping for ordinal features. Keys are column names.
+    use_domain_features : bool, default True
+        Whether to generate domain-engineered features.
+    use_target_encoding : bool, default False
+        Whether to apply target encoding to selected categorical variables.
+    target_enc_cols : list of str, optional
+        Columns eligible for target encoding.
+    enable_variance_selector : bool, default True
+        Whether to use variance thresholding.
+    variance_threshold : float
+        Minimum variance to retain a feature.
+    enable_kbest_mi : bool, default False
+        Whether to use mutual-information K-best selection.
+    k_best_features : int
+        Number of MI-ranked features to keep.
+    mi_random_state : int
+        Random state for MI scoring.
+
+    Returns
+    -------
+    sklearn.pipeline.Pipeline
+        Fully assembled preprocessing pipeline.
+
+    Examples
+    --------
+    >>> pipe = build_feature_pipeline(df_train, use_domain_features=True)
+    >>> X_train = pipe.fit_transform(df_train, y_train)
+    """
     if ordinal_mapping is None:
         ordinal_mapping = {}
 
@@ -67,7 +153,6 @@ def build_feature_pipeline(
             ("target_encoder", TargetEncoderTransformer(cols=target_enc_cols))
         )
 
-    # Quan trọng: transform -> finite_clean -> drop_all_nan
     steps.extend(
         [
             ("outlier_clip", OutlierClipper(factor=1.5)),
