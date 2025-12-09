@@ -457,7 +457,7 @@ class ModelTrainer:
     def tune_model_optuna(
         self,
         base_name: str,
-        n_trials: int = 30,
+        n_trials: int = 20,
         cv_splits: int = 5,
     ) -> Tuple[Dict, float, float]:
         """
@@ -987,7 +987,7 @@ class ModelTrainer:
     def tune_top_models(
         self,
         top_model_names: List[str],
-        n_trials: int = 30,
+        n_trials: int = 20,
         cv_splits: int = 5,
     ) -> List[str]:
         """
@@ -1143,7 +1143,7 @@ class ModelTrainer:
     def tune_stacking_with_optuna(
         self,
         tuned_model_names: List[str],
-        n_trials: int = 40,
+        n_trials: int = 20,
         cv_splits: int = 5,
     ) -> Tuple[str, Dict, Dict[str, float]]:
         """
@@ -1357,8 +1357,8 @@ class ModelTrainer:
     def run_full_model_selection_and_stacking(
         self,
         top_k: int = 5,
-        n_trials_model: int = 30,
-        n_trials_stack: int = 40,
+        n_trials_model: int = 20,
+        n_trials_stack: int = 20,
         cv_splits: int = 5,
     ) -> Dict[str, Dict]:
         """
