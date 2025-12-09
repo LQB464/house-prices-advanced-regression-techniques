@@ -1,4 +1,6 @@
 # src/modeling/preprocessing_mixin.py
+from preprocessing import ORDINAL_MAP_CANONICAL
+
 
 class PreprocessingMixin:
     """
@@ -17,11 +19,14 @@ class PreprocessingMixin:
 
         self.logger.info("Building feature pipeline for training data.")
         self.feature_pipe_ = self.dp.build_feature_pipeline(
+            df_train=self.X_train_,
+            ordinal_mapping=ORDINAL_MAP_CANONICAL,
             use_domain_features=True,
             use_target_encoding=False,
             enable_variance_selector=True,
             variance_threshold=0.0,
             enable_kbest_mi=True,
             k_best_features=200,
+            mi_random_state=0,
         )
-        self.logger.info("Feature pipeline built.")
+        self.logger.info("Feature preprocessing pipeline built successfully.")
