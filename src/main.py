@@ -61,13 +61,13 @@ def parse_args():
     parser.add_argument(
         "--trials-model",
         type=int,
-        default=20,
+        default=30,
         help="Number of Optuna trials per single model",
     )
     parser.add_argument(
         "--trials-stack",
         type=int,
-        default=20,
+        default=40,
         help="Number of Optuna trials for stacking",
     )
     parser.add_argument(
