@@ -1,4 +1,43 @@
-# src/modeling/stacking_mixin.py
+"""
+modeling/stacking_mixin.py
+
+Stacking ensemble tuning utilities powered by Optuna, supporting automatic
+selection of the best model combinations and meta-learner hyperparameters.
+
+Extended Description
+--------------------
+This module defines `StackingMixin`, which provides:
+- Optuna-powered hyperparameter search over stacking configurations
+- automatic selection of 3-model combinations from previously trained models
+- meta-estimator tuning (ElasticNet parameters, passthrough setting)
+- construction of final stacking regressor with the best trial settings
+- evaluation of the final stacked model on test data
+- exporting Optuna trials and summaries for analysis
+
+The mixin expects to be used inside a TrainerConfig-based class with:
+`self.models_`, `self.results_`, `self.feature_pipe_`, dataset splits,
+`self.output_dir`, `self.random_state`, `self.logger`, and `self.save_model`.
+
+Main Components
+---------------
+- _optuna_stack_objective: internal objective function used by Optuna
+- tune_stacking_with_optuna: full tuning workflow and final model training
+
+Usage Example
+-------------
+>>> class Trainer(TrainerConfig, StackingMixin):
+...     pass
+>>> trainer.train_default_models()
+>>> model_name, params, metrics = trainer.tune_stacking_with_optuna(
+...     tuned_model_names=["ridge", "lasso", "elasticnet", "random_forest"],
+...     n_trials=30
+... )
+
+Notes
+-----
+Optuna is optional and must be installed for tuning to work.  
+At least 3 previously fitted models are required to form stacking combinations.
+"""
 
 from typing import Dict, List, Tuple
 
@@ -24,13 +63,42 @@ if HAS_OPTUNA:
 
 class StackingMixin:
     """
-    Tuning stacking ensemble 3 model bằng Optuna.
+    Optuna-driven tuning and construction of stacking ensemble regressors.
 
-    Yêu cầu:
-        self.models_, self.results_, self.feature_pipe_
-        self.X_train_, self.y_train_, self.X_test_, self.y_test_
-        self.output_dir, self.random_state, self.logger
-        self.save_model
+    Extended Description
+    --------------------
+    The `StackingMixin` automates the process of:
+    - selecting combinations of base models for stacking
+    - tuning meta-learner hyperparameters using Optuna
+    - evaluating candidate stacking pipelines via cross-validation
+    - constructing the best-performing stacked model
+    - evaluating final performance and storing metrics
+
+    It requires TrainerConfig to provide:
+    `self.models_`, `self.results_`, `self.feature_pipe_`,
+    `self.X_train_`, `self.y_train_`, `self.X_test_`, `self.y_test_`,
+    `self.output_dir`, `self.random_state`, `self.logger`, and `self.save_model`.
+
+    Parameters
+    ----------
+    None
+        The mixin depends entirely on TrainerConfig for shared state.
+
+    Attributes
+    ----------
+    models_ : dict
+        Registry mapping model names to fitted pipelines.
+    results_ : dict
+        Evaluation metrics keyed by model name.
+    feature_pipe_ : sklearn.Pipeline or None
+        Preprocessing pipeline applied before training the stacked model.
+
+    Examples
+    --------
+    >>> trainer.train_default_models()
+    >>> name, params, metrics = trainer.tune_stacking_with_optuna(
+    ...     tuned_model_names=["ridge", "random_forest", "elasticnet"]
+    ... )
     """
 
     def _optuna_stack_objective(
@@ -116,9 +184,6 @@ class StackingMixin:
         n_trials: int = 20,
         cv_splits: int = 5,
     ) -> Tuple[str, Dict, Dict[str, float]]:
-        """
-        Dùng Optuna để tìm combo 3 model cùng meta parameters tốt nhất.
-        """
         if not HAS_OPTUNA:
             raise RuntimeError("Optuna is not installed.")
         if self.feature_pipe_ is None:
@@ -157,11 +222,11 @@ class StackingMixin:
         best_params = study.best_params
         best_combo = best_params["stack_combo"]
 
-        # Lưu lại toàn bộ trials
+        # Save all of trials
         df_trials = study.trials_dataframe()
         df_trials.to_csv(self.output_dir / "stacking_optuna_trials.csv", index=False)
 
-        # Summary theo combo
+        # Summary combo
         df_trials["stack_combo"] = df_trials["params_stack_combo"]
         summary = (
             df_trials.groupby("stack_combo")["value"]
@@ -181,7 +246,7 @@ class StackingMixin:
             f"[STACK] Best combo={best_combo} best_cv_rmse={study.best_value:.4f}"
         )
 
-        # Xây stack tốt nhất và train final
+        # Build the best stack train final
         base_estimators = []
         for name in best_combo:
             pipe = self.models_[name]

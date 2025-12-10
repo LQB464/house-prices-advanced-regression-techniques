@@ -48,8 +48,8 @@ except Exception:
 
 from preprocessing import Preprocessor, build_feature_pipeline, ORDINAL_MAP_CANONICAL
 
-from .metrics import _rmse, _get_scorers
-from .lgbm_wrapper import HAS_LGBM, LGBMRegressorWithEarlyStopping
+from .modeling.metrics import _rmse, _get_scorers
+from .modeling.lgbm_wrapper import HAS_LGBM, LGBMRegressorWithEarlyStopping
 
 
 class ModelTrainer:

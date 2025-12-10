@@ -1,4 +1,48 @@
-# src/modeling/lgbm_wrapper.py
+"""
+modeling/lgbm_wrapper.py
+
+Lightweight wrapper around LightGBM providing internal validation splitting
+for early stopping, enabling compatibility with sklearn meta-estimators
+such as StackingRegressor.
+
+Extended Description
+--------------------
+This module defines `LGBMRegressorWithEarlyStopping`, an sklearn-compatible
+regressor that injects its own train validation split during `.fit()`. This
+enables early stopping even when LightGBM is embedded inside models that do
+not expose validation sets, such as StackingRegressor or GridSearchCV.
+
+Features include:
+- automatic internal validation split using `val_size`
+- early stopping via LightGBM callback API
+- safe adjustment of `num_leaves` based on `max_depth`
+- seamless sklearn drop-in replacement (`fit`, `predict`, `get_params`, `set_params`)
+- optional dependency handling (works only when LightGBM is installed)
+
+Main Components
+---------------
+- LGBMRegressorWithEarlyStopping:
+  - fit: train LightGBM with early stopping and internal validation split
+  - predict: infer using best_iteration_ when available
+  - get_params / set_params: sklearn API compatibility
+
+Usage Example
+-------------
+>>> from modeling.lgbm_wrapper import LGBMRegressorWithEarlyStopping
+>>> model = LGBMRegressorWithEarlyStopping(
+...     max_n_estimators=2000,
+...     early_stopping_rounds=100,
+...     val_size=0.2,
+... )
+>>> model.fit(X_train, y_train)
+>>> preds = model.predict(X_test)
+
+Notes
+-----
+Early stopping requires that LightGBM is installed. If not available, fitting
+will raise an ImportError. Internally, this wrapper is used by the default
+model registry inside DefaultModelsMixin.
+"""
 
 from typing import Dict, Optional
 
@@ -18,9 +62,64 @@ except Exception:
 
 class LGBMRegressorWithEarlyStopping(BaseEstimator, RegressorMixin):
     """
-    LightGBM wrapper that uses an internal train and validation split
-    for early stopping. This allows early stopping even when used
-    inside StackingRegressor.
+    LightGBM regressor with automatic internal validation split for early stopping.
+
+    Extended Description
+    --------------------
+    This class wraps `lightgbm.LGBMRegressor` to introduce an internal train
+    validation split during `.fit()`. This design allows early stopping to
+    work even inside sklearn meta-estimators where validation sets are not
+    directly exposed.
+
+    Key responsibilities:
+    - splitting data internally using `val_size`
+    - fitting LightGBM with an early stopping callback
+    - tracking `best_iteration_` for inference
+    - exposing sklearn-compatible APIs (`fit`, `predict`, `get_params`, `set_params`)
+
+    Parameters
+    ----------
+    max_n_estimators : int, default 3000
+        Maximum boosting rounds for LightGBM.
+    learning_rate : float, default 0.03
+        Learning rate for boosting.
+    num_leaves : int, default 31
+        Maximum leaves for each tree.
+    max_depth : int, default 12
+        Maximum tree depth.
+    min_child_samples : int, default 20
+        Minimum samples per leaf.
+    min_child_weight : float, default 1e-3
+        Minimum sum Hessian in a leaf.
+    subsample : float, default 0.8
+        Row sampling rate for boosting.
+    colsample_bytree : float, default 0.8
+        Feature sampling per tree.
+    reg_alpha : float, default 0.1
+        L1 regularization.
+    reg_lambda : float, default 1.0
+        L2 regularization.
+    min_split_gain : float, default 0.0
+        Minimum gain required to split.
+    early_stopping_rounds : int, default 200
+        Number of rounds without improvement before early stopping.
+    val_size : float, default 0.15
+        Fraction of data used as validation split.
+    random_state : int, default 42
+        Random seed for splitting and model reproducibility.
+
+    Attributes
+    ----------
+    model_ : LGBMRegressor or None
+        Underlying LightGBM model after fitting.
+    best_iteration_ : int or None
+        Best iteration discovered via early stopping.
+
+    Examples
+    --------
+    >>> model = LGBMRegressorWithEarlyStopping(val_size=0.2)
+    >>> model.fit(X_train, y_train)
+    >>> preds = model.predict(X_test)
     """
 
     def __init__(

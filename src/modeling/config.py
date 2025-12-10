@@ -1,4 +1,50 @@
-# src/modeling/config.py
+"""
+modeling/config.py
+
+Central configuration manager coordinating experiment metadata, directory
+management, logging, dataset placeholders, preprocessing references, and
+runtime state for model training workflows.
+
+Extended Description
+--------------------
+This module defines a `TrainerConfig` class that acts as the shared state holder
+for the entire training pipeline. It supports:
+- storing core experiment parameters (target column, test size, random seed)
+- managing output directories for artifacts and logs
+- initializing a unified logger shared across all trainer components
+- holding dataset splits (X_train, X_test, y_train, y_test)
+- storing the preprocessing pipeline used to transform features
+- maintaining a registry of trained models and evaluation results
+- integrating a `Preprocessor` helper for feature engineering and pipeline construction
+
+Trainer components rely on this module to maintain consistent state and
+reproducible experiment structure.
+
+Main Components
+---------------
+- TrainerConfig: end-to-end configuration container with:
+  - logger construction with file + console handlers
+  - storage for dataset splits
+  - storage for preprocessing pipeline
+  - storage for fitted models and evaluation metrics
+  - shared Preprocessor instance for building feature pipelines
+
+Usage Example
+-------------
+>>> from modeling.config import TrainerConfig
+>>> cfg = TrainerConfig(target_col="SalePrice", test_size=0.2)
+>>> cfg.logger.info("Trainer configuration initialized.")
+>>> # Later in the pipeline:
+>>> # cfg.df_ = pd.read_csv("train.csv")
+>>> # cfg.feature_pipe_ = cfg.dp.build_feature_pipeline(df_train=cfg.df_)
+>>> # cfg.models_["xgboost"] = trained_model
+
+Notes
+-----
+The TrainerConfig is intended as the central state carrier for the training
+pipeline. It does not load data or train models by itself; instead, it provides
+the structure and storage that other trainer mixins build upon.
+"""
 
 from pathlib import Path
 from typing import Optional
@@ -11,14 +57,70 @@ from preprocessing import Preprocessor
 
 class TrainerConfig:
     """
-    Quản lý config, logger và state chung cho toàn bộ trainer.
+    Central configuration manager for the model training workflow.
 
-    Các mixin khác sẽ giả định những thuộc tính sau tồn tại:
-        - target_col, test_size, random_state, output_dir, logger
-        - df_, X_train_, X_test_, y_train_, y_test_
-        - feature_pipe_
-        - models_, results_
-        - dp (Preprocessor)
+    Extended Description
+    --------------------
+    The `TrainerConfig` class acts as the shared runtime state for the entire
+    training pipeline. It stores experiment settings, manages output
+    directories, initializes logging, and provides placeholders for dataset
+    splits, preprocessing pipelines, trained models, and evaluation results.
+
+    Trainer modules and mixins rely on this object to access:
+    - target column metadata
+    - train test split settings
+    - random seed configuration
+    - preprocessing pipeline reference
+    - output directory for artifacts
+    - unified logger
+    - runtime storage for fitted models and their metrics
+
+    Parameters
+    ----------
+    target_col : str, optional
+        Name of the target column to predict.
+    test_size : float, default 0.2
+        Fraction of the dataset allocated to the test split.
+    random_state : int, default 42
+        Random seed used across the training pipeline.
+    output_dir : str, default "model_outputs"
+        Root directory where logs, artifacts, and files are generated.
+    log_level : int, default logging.INFO
+        Logging verbosity level.
+
+    Attributes
+    ----------
+    output_dir : pathlib.Path
+        Directory containing all training outputs.
+    logger : logging.Logger
+        Unified logger writing both to console and to `training.log`.
+    df_ : DataFrame or None
+        Raw dataset loaded by the trainer.
+    X_train_ : DataFrame or None
+        Training feature matrix.
+    X_test_ : DataFrame or None
+        Test feature matrix.
+    y_train_ : Series or None
+        Target vector for training.
+    y_test_ : Series or None
+        Target vector for testing.
+    feature_pipe_ : sklearn.Pipeline or None
+        Preprocessing pipeline for transforming feature matrices.
+    models_ : dict
+        Dictionary mapping model names to fitted model instances.
+    results_ : dict
+        Evaluation metrics keyed by model name.
+    dp : Preprocessor
+        Preprocessor helper bound to the configured target column.
+
+    Examples
+    --------
+    >>> cfg = TrainerConfig(target_col="SalePrice", test_size=0.2)
+    >>> cfg.logger.info("Configuration initialized.")
+    >>> # Later in a training pipeline:
+    >>> # cfg.df_ = pd.read_csv("train.csv")
+    >>> # cfg.feature_pipe_ = cfg.dp.build_feature_pipeline(df_train=cfg.df_)
+    >>> # cfg.X_train_, cfg.X_test_, cfg.y_train_, cfg.y_test_ = ...
     """
 
     def __init__(

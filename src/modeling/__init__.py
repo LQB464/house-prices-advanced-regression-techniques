@@ -1,4 +1,4 @@
-# src/modeling/__init__.py
+# modeling/__init__.py
 import warnings
 from sklearn.exceptions import ConvergenceWarning
 

@@ -1,4 +1,44 @@
-# src/modeling/default_models_mixin.py
+"""
+modeling/default_models_mixin.py
+
+Default model registry and unified training utilities for benchmarking multiple
+regression estimators using a shared preprocessing pipeline.
+
+Extended Description
+--------------------
+This module defines the `DefaultModelsMixin`, which provides:
+- a collection of baseline regression models (linear, ensemble, boosting)
+- convenience methods for training a single model or a full baseline suite
+- cross-validation with unified scorers (RMSE, R2)
+- test-set evaluation with a shared sklearn Pipeline
+- model selection utilities based on evaluation metrics
+
+The mixin expects to be combined with TrainerConfig, which provides:
+- feature pipeline (`self.feature_pipe_`)
+- train test split data (`self.X_train_`, `self.y_train_`)
+- storage for results and fitted models (`self.results_`, `self.models_`)
+- unified logger and random_state
+
+Main Components
+---------------
+- get_default_models: return a dictionary of predefined estimators
+- train_single_model: train + CV + test evaluation for one model
+- train_default_models: train all baseline models
+- select_top_models: rank models based on metrics
+
+Usage Example
+-------------
+>>> class Trainer(TrainerConfig, DefaultModelsMixin):
+...     pass
+>>> trainer = Trainer()
+>>> trainer.train_default_models()
+>>> best = trainer.select_top_models(k=3)
+
+Notes
+-----
+Some models such as XGBoost, CatBoost, and LightGBM are optional and included
+only if available in the environment.
+"""
 
 from typing import Dict, List
 
@@ -33,24 +73,50 @@ except Exception:
 
 class DefaultModelsMixin:
     """
-    Chịu trách nhiệm:
-        - get_default_models
-        - train_single_model
-        - train_default_models
-        - select_top_models
+    Unified interface for training, evaluating, and ranking baseline models.
 
-    Yêu cầu:
-        self.feature_pipe_, self.X_train_, self.X_test_
-        self.y_train_, self.y_test_
-        self.models_, self.results_
-        self.random_state, self.logger
+    Extended Description
+    --------------------
+    The `DefaultModelsMixin` manages the full workflow for:
+    - retrieving predefined estimators (linear, tree-based, boosting)
+    - cross-validating each estimator using the shared preprocessing pipeline
+    - fitting the final model on training data
+    - evaluating performance on the test set using RMSE and R2
+    - recording metrics into `self.results_`
+    - registering fitted models into `self.models_`
+    - ranking models based on user-selected metrics
+
+    This mixin relies on TrainerConfig to provide:
+    `self.feature_pipe_`, dataset splits (`self.X_train_`, `self.y_train_`),
+    evaluation storage (`self.results_`, `self.models_`),
+    random seed (`self.random_state`), and logger.
+
+    Parameters
+    ----------
+    None
+        The mixin does not introduce its own constructor; it depends on
+        attributes supplied by TrainerConfig.
+
+    Attributes
+    ----------
+    models_ : dict
+        Registry mapping model names to fitted sklearn Pipelines.
+    results_ : dict
+        Evaluation metrics keyed by model name.
+    feature_pipe_ : sklearn.Pipeline or None
+        Shared preprocessing pipeline applied before all estimators.
+
+    Examples
+    --------
+    >>> class Trainer(TrainerConfig, DefaultModelsMixin):
+    ...     pass
+    >>> trainer = Trainer()
+    >>> trainer.train_default_models()
+    >>> trainer.select_top_models(k=5)
     """
 
     @staticmethod
     def get_default_models(random_state: int) -> Dict[str, BaseEstimator]:
-        """
-        Các baseline model để benchmark.
-        """
         models: Dict[str, BaseEstimator] = {
             "random_forest": RandomForestRegressor(
                 n_estimators=600,
@@ -110,9 +176,6 @@ class DefaultModelsMixin:
         estimator: BaseEstimator,
         cv_splits: int = 5,
     ) -> Dict[str, float]:
-        """
-        Train và cross validate một model với pipeline features chung.
-        """
         if self.feature_pipe_ is None:
             raise RuntimeError("Feature pipeline not built. Call build_preprocessing first.")
         if self.X_train_ is None or self.y_train_ is None:
@@ -147,15 +210,15 @@ class DefaultModelsMixin:
             f"CV R2={cv_r2_mean:.4f}±{cv_r2_std:.4f}"
         )
 
-        # Fit trên full train
+        # Fit on full train
         pipe.fit(self.X_train_, self.y_train_)
 
-        # Evaluate trên test
+        # Evaluate on test
         y_pred = pipe.predict(self.X_test_)
         test_rmse = _rmse(self.y_test_, y_pred)
         test_r2 = float(
             pd.Series(self.y_test_).corr(pd.Series(y_pred)) ** 2
-        )  # hoặc dùng r2_score nếu thích
+        )  # or use r2_score 
 
         self.logger.info(
             f"[{name}] Test RMSE={test_rmse:.4f} Test R2={test_r2:.4f}"
@@ -196,9 +259,6 @@ class DefaultModelsMixin:
         self.logger.info("Finished training all default models.")
 
     def select_top_models(self, k: int = 5, by: str = "cv_rmse_mean") -> List[str]:
-        """
-        Chọn top k models dựa theo metric trong self.results_.
-        """
         if not self.results_:
             raise RuntimeError("No results to select from. Train models first.")
 

@@ -1,4 +1,45 @@
-# src/modeling/tuning_mixin.py
+"""
+modeling/tuning_mixin.py
+
+Hyperparameter tuning utilities supporting both Optuna-based search and
+GridSearchCV, applied to multiple model families in a unified pipeline.
+
+Extended Description
+--------------------
+This module provides the `TuningMixin`, which enables:
+- Optuna-based hyperparameter tuning for complex models such as
+  RandomForest, ElasticNet, XGBoost, CatBoost, and LightGBM.
+- GridSearchCV tuning for simpler linear and kernel-based models.
+- Unified scoring using the project's RMSE and R2 scorers.
+- Automatic reconstruction of the best estimator from tuned parameters.
+- Consistent logging, model registration, and result storage.
+
+The mixin expects to operate inside a TrainerConfig-derived class that provides:
+`self.feature_pipe_`, dataset splits (`self.X_train_`, `self.y_train_`,
+`self.X_test_`, `self.y_test_`), registries (`self.models_`, `self.results_`),
+as well as `self.output_dir`, `self.random_state`, `self.logger`,
+and utility functions `self.train_single_model` and `self.save_model`.
+
+Main Components
+---------------
+- _build_tuning_pipeline: wrap estimators with preprocessing
+- tune_model_optuna: Optuna tuning for supported models
+- tune_model_gridsearch: GridSearchCV tuning for simple models
+- tune_top_models: orchestrates tuning for top-ranked models
+
+Usage Example
+-------------
+>>> class Trainer(TrainerConfig, TuningMixin):
+...     pass
+>>> best_params, rmse, r2 = trainer.tune_model_optuna("random_forest")
+>>> tuned_names = trainer.tune_top_models(["ridge", "random_forest"])
+
+Notes
+-----
+Certain model types require optional dependencies (XGBoost, CatBoost,
+LightGBM). If these libraries are not installed, their tuning paths
+raise informative runtime errors.
+"""
 
 from typing import Dict, List, Optional, Tuple
 
@@ -32,13 +73,42 @@ if HAS_CATBOOST:
 
 class TuningMixin:
     """
-    Hyperparameter tuning cho từng model, dùng Optuna hoặc GridSearchCV.
+    Hyperparameter tuning engine supporting Optuna and GridSearchCV workflows.
 
-    Yêu cầu:
-        self.feature_pipe_, self.X_train_, self.y_train_, self.X_test_, self.y_test_
-        self.models_, self.results_
-        self.output_dir, self.random_state, self.logger
-        self.train_single_model, self.save_model
+    Extended Description
+    --------------------
+    The `TuningMixin` automates:
+    - building preprocessing + model pipelines for tuning
+    - creating Optuna objectives for complex model families
+    - running TPE sampling with pruning when available
+    - reconstructing the best estimator from tuned parameters
+    - optionally falling back to GridSearch for simpler models
+    - tracking tuned model performance and saving results
+
+    It requires several TrainerConfig attributes:
+    `self.feature_pipe_`, `self.X_train_`, `self.y_train_`,
+    `self.X_test_`, `self.y_test_`, `self.models_`, `self.results_`,
+    `self.output_dir`, `self.random_state`, `self.logger`,
+    and utility functions `self.train_single_model` and `self.save_model`.
+
+    Parameters
+    ----------
+    None
+        The mixin depends entirely on TrainerConfig for shared state.
+
+    Attributes
+    ----------
+    models_ : dict
+        Registry of fitted models (baseline and tuned).
+    results_ : dict
+        Evaluation metrics for each model.
+    feature_pipe_ : sklearn.Pipeline or None
+        Preprocessing pipeline shared by all tuned models.
+
+    Examples
+    --------
+    >>> best_params, rmse, r2 = trainer.tune_model_optuna("elasticnet")
+    >>> tuned = trainer.tune_top_models(["ridge", "svr"])
     """
 
     def _build_tuning_pipeline(self, est: BaseEstimator) -> Pipeline:
@@ -51,19 +121,13 @@ class TuningMixin:
             ]
         )
 
-    # ---------------------------------------------------------
     # Optuna tuning
-    # ---------------------------------------------------------
     def tune_model_optuna(
         self,
         base_name: str,
         n_trials: int = 50,
         cv_splits: int = 5,
     ) -> Tuple[Dict, float, float]:
-        """
-        Tuning hyperparameter cho một base model bằng Optuna.
-        Trả về (best_params, test_rmse, test_r2).
-        """
         if not HAS_OPTUNA:
             raise RuntimeError("Optuna is not installed.")
 
@@ -379,19 +443,14 @@ class TuningMixin:
 
         return best_params, test_rmse, test_r2
 
-    # ---------------------------------------------------------
     # GridSearch tuning
-    # ---------------------------------------------------------
     def tune_model_gridsearch(
         self,
         base_name: str,
         param_grid: Dict[str, List],
         cv_splits: int = 5,
     ) -> Tuple[Dict, float, float]:
-        """
-        Tuning hyperparameter với GridSearchCV cho các model đơn giản như
-        ridge, lasso, svr.
-        """
+        
         if self.X_train_ is None or self.y_train_ is None:
             raise RuntimeError("Training data not available.")
         if self.feature_pipe_ is None:
@@ -409,7 +468,6 @@ class TuningMixin:
         est = base_models[base_name]
         pipe = self._build_tuning_pipeline(est)
 
-        # Chuyển "param" thành "model__param"
         grid = {f"model__{k}": v for k, v in param_grid.items()}
 
         grid_cv = GridSearchCV(
@@ -435,7 +493,7 @@ class TuningMixin:
 
         y_pred = self.models_[tuned_name].predict(self.X_test_)
         test_rmse = _rmse(self.y_test_, y_pred)
-        # Đơn giản dùng R2 của sklearn nếu muốn
+
         from sklearn.metrics import r2_score
 
         test_r2 = float(r2_score(self.y_test_, y_pred))
@@ -460,18 +518,14 @@ class TuningMixin:
 
         return best_params, test_rmse, test_r2
 
-    # ---------------------------------------------------------
     # Orchestrate tuning cho top models
-    # ---------------------------------------------------------
     def tune_top_models(
         self,
         top_model_names: List[str],
         n_trials: int = 50,
         cv_splits: int = 5,
     ) -> List[str]:
-        """
-        Lặp qua danh sách top models và tuning bằng Optuna hoặc GridSearch.
-        """
+        
         tuned_names: List[str] = []
 
         grids = {
